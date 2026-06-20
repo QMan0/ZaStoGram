@@ -45,6 +45,7 @@ PROXY_CHECK_CLOSE_RE = re.compile(r"proxy_check_connection_closed close_reason=(
 PROXY_CHECK_CLOSE_WITH_PING_RE = re.compile(r"proxy_check_connection_closed close_reason=([-0-9]+) ping_id=([0-9]+)")
 PROXY_CHECK_IGNORED_CLOSE_RE = re.compile(r"proxy_check_connection_closed_ignored close_reason=([-0-9]+)")
 PROXY_ROTATION_RE = re.compile(r"proxy_rotation ([a-z_]+)")
+PROXY_CONNECTION_STAGE_RE = re.compile(r"proxy_connection_stage account=([0-9]+) phase=([^ ]+)")
 ENDPOINT_RE = re.compile(r"endpoint=([^ ]+)")
 SCHEDULER_LISTENERS_RE = re.compile(r"listeners=([0-9]+)")
 SCHEDULER_FORCE_RE = re.compile(r"force=(true|false)")
@@ -203,6 +204,7 @@ class Attempt:
 
         event_map = {
             "connect_start": "connect_start",
+            "host_resolve_start": "host_resolve_start",
             "socket_connect_start": "socket_connect_start",
             "socket_connected": "socket_connected",
             "client_hello_send_progress": "client_hello_send_progress",
@@ -577,6 +579,29 @@ def print_proxy_check_summary(lines: list[str]) -> None:
         print("  Scheduler endpoints:")
         for endpoint, count in scheduler_endpoints.most_common(10):
             print(f"    {endpoint}: {count}")
+
+
+def print_java_live_stage_summary(lines: list[str]) -> None:
+    stages: Counter[str] = Counter()
+    accounts: Counter[str] = Counter()
+    for text in lines:
+        stage = PROXY_CONNECTION_STAGE_RE.search(text)
+        if not stage:
+            continue
+        accounts[stage.group(1)] += 1
+        stages[stage.group(2)] += 1
+
+    if not stages:
+        return
+
+    print()
+    print("Java live connection stages:")
+    print("  Phases:")
+    for phase, count in stages.most_common():
+        print(f"    {phase}: {count}")
+    print("  Accounts:")
+    for account, count in accounts.most_common():
+        print(f"    account{account}: {count}")
 
 
 def print_faketls_endpoint_summary(attempts: list[Attempt]) -> None:
@@ -1056,6 +1081,7 @@ def print_report(attempts: list[Attempt], global_lines: list[str]) -> None:
     all_lines = list(global_lines)
     for attempt in attempts:
         all_lines.extend(attempt.lines)
+    print_java_live_stage_summary(all_lines)
     print_proxy_check_summary(all_lines)
 
     print()

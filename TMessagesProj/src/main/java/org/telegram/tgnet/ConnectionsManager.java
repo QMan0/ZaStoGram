@@ -39,6 +39,7 @@ import org.telegram.messenger.KeepAliveJob;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.NotificationCenter;
+import org.telegram.messenger.ProxyCheckDiagnostics;
 import org.telegram.messenger.PushListenerController;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.StatsController;
@@ -881,6 +882,21 @@ public class ConnectionsManager extends BaseController {
         });
     }
 
+    public static void onProxyConnectionStageChanged(final int currentAccount, final String diagnostic) {
+        AndroidUtilities.runOnUIThread(() -> {
+            String normalizedDiagnostic = ProxyCheckDiagnostics.normalize(diagnostic);
+            SharedConfig.ProxyInfo currentProxy = SharedConfig.currentProxy;
+            if (currentProxy != null && ProxyCheckDiagnostics.isLivePhase(normalizedDiagnostic)) {
+                currentProxy.lastCheckDiagnostic = normalizedDiagnostic;
+                currentProxy.lastCheckDiagnosticTime = SystemClock.elapsedRealtime();
+            }
+            if (BuildVars.LOGS_ENABLED) {
+                FileLog.d("proxy_connection_stage account=" + currentAccount + " phase=" + normalizedDiagnostic);
+            }
+            AccountInstance.getInstance(currentAccount).getNotificationCenter().postNotificationName(NotificationCenter.proxyConnectionStageChanged, normalizedDiagnostic);
+        });
+    }
+
     public static void onLogout(final int currentAccount) {
         AndroidUtilities.runOnUIThread(() -> {
             AccountInstance accountInstance = AccountInstance.getInstance(currentAccount);
@@ -1047,14 +1063,47 @@ public class ConnectionsManager extends BaseController {
         return mode;
     }
 
+    private static class WssSocksProxy {
+        String host = "";
+        int port = 1080;
+        String username = "";
+        String password = "";
+        boolean enabled;
+    }
+
+    private static WssSocksProxy resolveWssSocksProxy(int mode) {
+        WssSocksProxy proxy = new WssSocksProxy();
+        SharedConfig.loadProxyList();
+        if (mode != WSS_TRANSPORT_SOCKS5 || SharedConfig.currentProxy == null) {
+            return proxy;
+        }
+        if (!TextUtils.isEmpty(SharedConfig.currentProxy.secret) || TextUtils.isEmpty(SharedConfig.currentProxy.address)) {
+            return proxy;
+        }
+        int port = SharedConfig.currentProxy.port;
+        if (port <= 0 || port > 65535) {
+            return proxy;
+        }
+        proxy.host = SharedConfig.currentProxy.address;
+        proxy.port = port;
+        proxy.username = SharedConfig.currentProxy.username != null ? SharedConfig.currentProxy.username : "";
+        proxy.password = SharedConfig.currentProxy.password != null ? SharedConfig.currentProxy.password : "";
+        proxy.enabled = true;
+        return proxy;
+    }
+
     public static void setWssTransportSettings() {
         int mode = resolveWssTransportMode();
         String host = SharedConfig.wssHost != null ? SharedConfig.wssHost : "";
         String path = SharedConfig.normalizeWssPath(SharedConfig.wssPath);
         int port = SharedConfig.wssPort > 0 && SharedConfig.wssPort <= 65535 ? SharedConfig.wssPort : 443;
         boolean enabled = mode != WSS_TRANSPORT_OFF;
+        WssSocksProxy wssSocksProxy = resolveWssSocksProxy(mode);
+        String wssSocksHost = wssSocksProxy.host;
+        String wssSocksUsername = wssSocksProxy.username;
+        String wssSocksPassword = wssSocksProxy.password;
         for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
-            native_setWssTransportSettings(a, mode, mode, host, port, path, SharedConfig.wssUseForMiniApps, enabled);
+            native_setWssTransportSettings(a, mode, mode, host, port, path, SharedConfig.wssUseForMiniApps, wssSocksHost, wssSocksProxy.port, wssSocksUsername, wssSocksPassword, wssSocksProxy.enabled, enabled);
         }
     }
 
@@ -1197,7 +1246,7 @@ public class ConnectionsManager extends BaseController {
     public static native void native_setUserId(int currentAccount, long id);
     public static native void native_init(int currentAccount, int version, int layer, int apiId, String deviceModel, String systemVersion, String appVersion, String langCode, String systemLangCode, String configPath, String logPath, String regId, String cFingerprint, String installer, String packageId, int timezoneOffset, long userId, boolean userPremium, boolean enablePushConnection, boolean hasNetwork, int networkType, int performanceClass);
     public static native void native_setProxySettings(int currentAccount, String address, int port, String username, String password, String secret, int mtProxyTlsProfile, int mtProxyClientHelloFragmentation, int mtProxyConnectionPatternMode, int mtProxyRecordSizingMode, int mtProxyTimingMode, int mtProxyStartupCoverMode);
-    public static native void native_setWssTransportSettings(int currentAccount, int mode, int gatewayMode, String host, int port, String path, boolean miniApps, boolean enabled);
+    public static native void native_setWssTransportSettings(int currentAccount, int mode, int gatewayMode, String host, int port, String path, boolean miniApps, String socksHost, int socksPort, String socksUsername, String socksPassword, boolean socksEnabled, boolean enabled);
     public static native void native_setLangCode(int currentAccount, String langCode);
     public static native void native_setRegId(int currentAccount, String regId);
     public static native void native_setSystemLangCode(int currentAccount, String langCode);

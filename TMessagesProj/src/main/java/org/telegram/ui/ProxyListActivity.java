@@ -159,6 +159,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
     private int wssTransportInfoRow;
     private int wssCustomGatewayRow;
     private int wssMiniAppsRow;
+    private int wssSocksUpstreamInfoRow;
     private int callsDetailRow;
     private int deleteAllRow;
 
@@ -368,6 +369,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
         NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.proxySettingsChanged);
         NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.proxyCheckDone);
         NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.didUpdateConnectionState);
+        NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.proxyConnectionStageChanged);
 
         final SharedPreferences preferences = MessagesController.getGlobalMainSettings();
         useProxySettings = preferences.getBoolean("proxy_enabled", false) && !SharedConfig.proxyList.isEmpty();
@@ -386,6 +388,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
         NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.proxySettingsChanged);
         NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.proxyCheckDone);
         NotificationCenter.getInstance(currentAccount).removeObserver(this, NotificationCenter.didUpdateConnectionState);
+        NotificationCenter.getInstance(currentAccount).removeObserver(this, NotificationCenter.proxyConnectionStageChanged);
         ProxyCheckScheduler.cancelOwner(this);
     }
 
@@ -516,6 +519,21 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                     return;
                 }
                 SharedConfig.ProxyInfo info = proxyList.get(position - proxyStartRow);
+                if (isWssSocks5TransportSelected()) {
+                    useProxySettings = false;
+                    useProxyForCalls = false;
+                    saveSelectedProxy(info, false);
+                    for (int a = proxyStartRow; a < proxyEndRow; a++) {
+                        RecyclerListView.Holder holder = (RecyclerListView.Holder) listView.findViewHolderForAdapterPosition(a);
+                        if (holder != null) {
+                            TextDetailProxyCell cell = (TextDetailProxyCell) holder.itemView;
+                            cell.setChecked(cell.currentInfo == info);
+                            cell.updateStatus();
+                        }
+                    }
+                    reapplyWssTransportSettings();
+                    return;
+                }
                 useProxySettings = true;
                 SharedPreferences.Editor editor = MessagesController.getGlobalMainSettings().edit();
                 editor.putString("proxy_ip", info.address);
@@ -697,6 +715,19 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
         NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.proxySettingsChanged);
     }
 
+    private void saveSelectedProxy(SharedConfig.ProxyInfo info, boolean enabled) {
+        SharedPreferences.Editor editor = MessagesController.getGlobalMainSettings().edit();
+        editor.putString("proxy_ip", info.address);
+        editor.putString("proxy_pass", info.password);
+        editor.putString("proxy_user", info.username);
+        editor.putInt("proxy_port", info.port);
+        editor.putString("proxy_secret", info.secret);
+        editor.putBoolean("proxy_enabled", enabled);
+        editor.apply();
+        SharedConfig.currentProxy = info;
+        SharedConfig.saveProxyList();
+    }
+
     private int getWssTransportModeIndex() {
         for (int i = 0; i < WSS_TRANSPORT_OPTIONS.length; i++) {
             if (WSS_TRANSPORT_OPTIONS[i] == SharedConfig.normalizeWssTransportMode(SharedConfig.wssTransportMode)) {
@@ -720,6 +751,18 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
             return getString(R.string.UseProxyWss);
         }
         return SharedConfig.wssHost + ":" + SharedConfig.wssPort + SharedConfig.normalizeWssPath(SharedConfig.wssPath);
+    }
+
+    private boolean isWssTransportSelected() {
+        return SharedConfig.normalizeWssTransportMode(SharedConfig.wssTransportMode) != ConnectionsManager.WSS_TRANSPORT_OFF;
+    }
+
+    private boolean isWssSocks5TransportSelected() {
+        return SharedConfig.normalizeWssTransportMode(SharedConfig.wssTransportMode) == ConnectionsManager.WSS_TRANSPORT_SOCKS5;
+    }
+
+    private boolean isPlainSocksProxy(SharedConfig.ProxyInfo info) {
+        return info != null && TextUtils.isEmpty(info.secret);
     }
 
     private String[] getMtProxyTlsProfileOptionLabels() {
@@ -806,37 +849,69 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
 
     private void updateRows(boolean notify) {
         rowCount = 0;
-        useProxyRow = rowCount++;
-        if (useProxySettings && SharedConfig.currentProxy != null && SharedConfig.proxyList.size() > 1 && IS_PROXY_ROTATION_AVAILABLE) {
-            rotationRow = rowCount++;
-            if (SharedConfig.proxyRotationEnabled) {
-                rotationTimeoutRow = rowCount++;
-                rotationTimeoutInfoRow = rowCount++;
+        boolean wssTransportSelected = isWssTransportSelected();
+        boolean wssSocks5TransportSelected = isWssSocks5TransportSelected();
+        if (wssTransportSelected && !selectedItems.isEmpty()) {
+            selectedItems.clear();
+            actionBar.hideActionMode();
+        }
+        if (!wssTransportSelected) {
+            useProxyRow = rowCount++;
+            if (useProxySettings && SharedConfig.currentProxy != null && SharedConfig.proxyList.size() > 1 && IS_PROXY_ROTATION_AVAILABLE) {
+                rotationRow = rowCount++;
+                if (SharedConfig.proxyRotationEnabled) {
+                    rotationTimeoutRow = rowCount++;
+                    rotationTimeoutInfoRow = rowCount++;
+                } else {
+                    rotationTimeoutRow = -1;
+                    rotationTimeoutInfoRow = -1;
+                }
             } else {
+                rotationRow = -1;
                 rotationTimeoutRow = -1;
                 rotationTimeoutInfoRow = -1;
             }
+            if (useProxySettings && SharedConfig.currentProxy != null && !SharedConfig.currentProxy.secret.isEmpty()) {
+                tlsProfileRow = rowCount++;
+                tlsProfileInfoRow = rowCount++;
+                clientHelloFragmentationRow = rowCount++;
+                clientHelloFragmentationInfoRow = rowCount++;
+                mtProxySoftMuxRow = rowCount++;
+                mtProxySoftMuxInfoRow = rowCount++;
+                mtProxyConnectionPatternRow = rowCount++;
+                mtProxyConnectionPatternInfoRow = rowCount++;
+                mtProxyRecordSizingRow = rowCount++;
+                mtProxyRecordSizingInfoRow = rowCount++;
+                mtProxyTimingRow = rowCount++;
+                mtProxyTimingInfoRow = rowCount++;
+                mtProxyStartupCoverRow = rowCount++;
+                mtProxyStartupCoverInfoRow = rowCount++;
+            } else {
+                tlsProfileRow = -1;
+                tlsProfileInfoRow = -1;
+                clientHelloFragmentationRow = -1;
+                clientHelloFragmentationInfoRow = -1;
+                mtProxySoftMuxRow = -1;
+                mtProxySoftMuxInfoRow = -1;
+                mtProxyConnectionPatternRow = -1;
+                mtProxyConnectionPatternInfoRow = -1;
+                mtProxyRecordSizingRow = -1;
+                mtProxyRecordSizingInfoRow = -1;
+                mtProxyTimingRow = -1;
+                mtProxyTimingInfoRow = -1;
+                mtProxyStartupCoverRow = -1;
+                mtProxyStartupCoverInfoRow = -1;
+            }
+            if (rotationTimeoutInfoRow == -1 && tlsProfileInfoRow == -1 && clientHelloFragmentationInfoRow == -1 && mtProxySoftMuxInfoRow == -1 && mtProxyConnectionPatternInfoRow == -1 && mtProxyRecordSizingInfoRow == -1 && mtProxyTimingInfoRow == -1 && mtProxyStartupCoverInfoRow == -1) {
+                useProxyShadowRow = rowCount++;
+            } else {
+                useProxyShadowRow = -1;
+            }
         } else {
+            useProxyRow = -1;
             rotationRow = -1;
             rotationTimeoutRow = -1;
             rotationTimeoutInfoRow = -1;
-        }
-        if (useProxySettings && SharedConfig.currentProxy != null && !SharedConfig.currentProxy.secret.isEmpty()) {
-            tlsProfileRow = rowCount++;
-            tlsProfileInfoRow = rowCount++;
-            clientHelloFragmentationRow = rowCount++;
-            clientHelloFragmentationInfoRow = rowCount++;
-            mtProxySoftMuxRow = rowCount++;
-            mtProxySoftMuxInfoRow = rowCount++;
-            mtProxyConnectionPatternRow = rowCount++;
-            mtProxyConnectionPatternInfoRow = rowCount++;
-            mtProxyRecordSizingRow = rowCount++;
-            mtProxyRecordSizingInfoRow = rowCount++;
-            mtProxyTimingRow = rowCount++;
-            mtProxyTimingInfoRow = rowCount++;
-            mtProxyStartupCoverRow = rowCount++;
-            mtProxyStartupCoverInfoRow = rowCount++;
-        } else {
             tlsProfileRow = -1;
             tlsProfileInfoRow = -1;
             clientHelloFragmentationRow = -1;
@@ -851,10 +926,6 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
             mtProxyTimingInfoRow = -1;
             mtProxyStartupCoverRow = -1;
             mtProxyStartupCoverInfoRow = -1;
-        }
-        if (rotationTimeoutInfoRow == -1 && tlsProfileInfoRow == -1 && clientHelloFragmentationInfoRow == -1 && mtProxySoftMuxInfoRow == -1 && mtProxyConnectionPatternInfoRow == -1 && mtProxyRecordSizingInfoRow == -1 && mtProxyTimingInfoRow == -1 && mtProxyStartupCoverInfoRow == -1) {
-            useProxyShadowRow = rowCount++;
-        } else {
             useProxyShadowRow = -1;
         }
         wssTransportHeaderRow = rowCount++;
@@ -871,15 +942,24 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
             wssCustomGatewayRow = -1;
             wssMiniAppsRow = -1;
         }
-        connectionsHeaderRow = rowCount++;
+        connectionsHeaderRow = (!wssTransportSelected || wssSocks5TransportSelected) ? rowCount++ : -1;
 
         if (notify) {
             proxyList.clear();
-            proxyList.addAll(SharedConfig.proxyList);
-            ProxyCheckScheduler.clearDetachedCheckStates(proxyList, "proxy_list_passive");
+            if (!wssTransportSelected) {
+                proxyList.addAll(SharedConfig.proxyList);
+                ProxyCheckScheduler.clearDetachedCheckStates(proxyList, "proxy_list_passive");
+            } else if (wssSocks5TransportSelected) {
+                for (SharedConfig.ProxyInfo info : SharedConfig.proxyList) {
+                    if (isPlainSocksProxy(info)) {
+                        proxyList.add(info);
+                    }
+                }
+                ProxyCheckScheduler.clearDetachedCheckStates(proxyList, "wss_socks_upstream");
+            }
 
             boolean checking = false;
-            if (!wasCheckedAllList) {
+            if (!wssTransportSelected && !wasCheckedAllList) {
                 for (SharedConfig.ProxyInfo info : proxyList) {
                     if (info.checking || !ProxyCheckScheduler.isFresh(info)) {
                         checking = true;
@@ -906,7 +986,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
             });
         }
 
-        if (!proxyList.isEmpty()) {
+        if ((!wssTransportSelected || wssSocks5TransportSelected) && !proxyList.isEmpty()) {
             proxyStartRow = rowCount;
             rowCount += proxyList.size();
             proxyEndRow = rowCount;
@@ -914,13 +994,14 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
             proxyStartRow = -1;
             proxyEndRow = -1;
         }
-        proxyAddRow = rowCount++;
-        proxyShadowRow = rowCount++;
-        if (SharedConfig.currentProxy == null || SharedConfig.currentProxy.secret.isEmpty()) {
+        proxyAddRow = (!wssTransportSelected || wssSocks5TransportSelected) ? rowCount++ : -1;
+        proxyShadowRow = (!wssTransportSelected || wssSocks5TransportSelected) ? rowCount++ : -1;
+        wssSocksUpstreamInfoRow = wssSocks5TransportSelected ? rowCount++ : -1;
+        if (!wssTransportSelected && (SharedConfig.currentProxy == null || SharedConfig.currentProxy.secret.isEmpty())) {
             boolean change = callsRow == -1;
             callsRow = rowCount++;
             callsDetailRow = rowCount++;
-            if (!notify && change) {
+            if (!notify && change && proxyShadowRow >= 0) {
                 listAdapter.notifyItemChanged(proxyShadowRow);
                 listAdapter.notifyItemRangeInserted(proxyShadowRow + 1, 2);
             }
@@ -928,12 +1009,12 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
             boolean change = callsRow != -1;
             callsRow = -1;
             callsDetailRow = -1;
-            if (!notify && change) {
+            if (!notify && change && proxyShadowRow >= 0) {
                 listAdapter.notifyItemChanged(proxyShadowRow);
                 listAdapter.notifyItemRangeRemoved(proxyShadowRow + 1, 2);
             }
         }
-        if (proxyList.size() >= 10) {
+        if (!wssTransportSelected && proxyList.size() >= 10) {
             deleteAllRow = rowCount++;
         } else {
             deleteAllRow = -1;
@@ -948,7 +1029,36 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
         if (actionBar == null) {
             return;
         }
+        if (isWssTransportSelected()) {
+            int mode = SharedConfig.normalizeWssTransportMode(SharedConfig.wssTransportMode);
+            String status;
+            if (mode == ConnectionsManager.WSS_TRANSPORT_OFFICIAL) {
+                status = getString(R.string.WssTransportOfficial);
+            } else if (mode == ConnectionsManager.WSS_TRANSPORT_SOCKS5) {
+                status = getString(R.string.WssTransportSocks5);
+            } else {
+                status = getString(R.string.WssTransportCustom);
+            }
+            actionBar.setSubtitle(getString(R.string.WssTransportHeader) + ": " + status);
+            return;
+        }
         actionBar.setSubtitle(ProxyCheckDiagnostics.headerStatusText(SharedConfig.currentProxy, useProxySettings, currentConnectionState));
+    }
+
+    private void updateCurrentProxyStatusCell() {
+        updateProxyActionBarStatus();
+        if (listView == null || SharedConfig.currentProxy == null || proxyStartRow < 0) {
+            return;
+        }
+        int idx = proxyList.indexOf(SharedConfig.currentProxy);
+        if (idx < 0) {
+            return;
+        }
+        RecyclerListView.Holder holder = (RecyclerListView.Holder) listView.findViewHolderForAdapterPosition(idx + proxyStartRow);
+        if (holder != null && holder.itemView instanceof TextDetailProxyCell) {
+            TextDetailProxyCell cell = (TextDetailProxyCell) holder.itemView;
+            cell.updateStatus();
+        }
     }
 
     private void markConnectedCurrentProxyIfNeeded() {
@@ -992,6 +1102,8 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
         } else if (id == NotificationCenter.proxySettingsChanged) {
             updateRows(true);
             updateProxyActionBarStatus();
+        } else if (id == NotificationCenter.proxyConnectionStageChanged) {
+            updateCurrentProxyStatusCell();
         } else if (id == NotificationCenter.didUpdateConnectionState) {
             int state = ConnectionsManager.getInstance(account).getConnectionState();
             if (currentConnectionState != state) {
@@ -1128,7 +1240,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                 case VIEW_TYPE_HEADER: {
                     HeaderCell headerCell = (HeaderCell) holder.itemView;
                     if (position == connectionsHeaderRow) {
-                        headerCell.setText(getString(R.string.ProxyConnections));
+                        headerCell.setText(isWssSocks5TransportSelected() ? getString(R.string.WssSocksUpstreamHeader) : getString(R.string.ProxyConnections));
                     } else if (position == wssTransportHeaderRow) {
                         headerCell.setText(getString(R.string.WssTransportHeader));
                     }
@@ -1173,6 +1285,8 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                         cell.setText(getString(R.string.MtProxyStartupCoverInfo));
                     } else if (position == wssTransportInfoRow) {
                         cell.setText(getString(R.string.WssTransportMode) + "\n" + getString(R.string.WssTransportInfo));
+                    } else if (position == wssSocksUpstreamInfoRow) {
+                        cell.setText(getString(R.string.WssSocksUpstreamInfo));
                     }
                     break;
                 }
@@ -1425,6 +1539,8 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                 return -27;
             } else if (position == wssMiniAppsRow) {
                 return -28;
+            } else if (position == wssSocksUpstreamInfoRow) {
+                return -31;
             } else if (position >= proxyStartRow && position < proxyEndRow) {
                 return proxyList.get(position - proxyStartRow).hashCode();
             } else {

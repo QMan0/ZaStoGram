@@ -265,6 +265,16 @@
     <string name="RemindDayYearAt">\'Напомнить\' d MMM yyyy \'в\' HH:mm</string>
     <string name="ProxyStatusConnectingSlow">Подключаемся, это может занять время</string>
     <string name="ProxyStatusCheckingConnection">Проверяем подключение...</string>
+    <string name="ProxyStatusAdmissionQueue">Ждём слот подключения к прокси...</string>
+    <string name="ProxyStatusHostResolve">Ищем адрес прокси...</string>
+    <string name="ProxyStatusConnectStart">Готовим подключение к прокси...</string>
+    <string name="ProxyStatusTcpConnecting">Открываем TCP-соединение...</string>
+    <string name="ProxyStatusTcpConnected">TCP открыт, начинаем TLS-маскировку...</string>
+    <string name="ProxyStatusClientHelloSent">ClientHello отправлен, ждём ServerHello...</string>
+    <string name="ProxyStatusServerHelloOk">ServerHello принят, запускаем MTProto...</string>
+    <string name="ProxyStatusMtprotoStarting">MTProxy-рукопожатие прошло, запускаем MTProto...</string>
+    <string name="ProxyStatusFirstDataSent">Первые MTProto-данные отправлены...</string>
+    <string name="ProxyStatusFirstDataReceived">Первые MTProto-данные получены</string>
     <string name="ProxyStatusWaitingTcp">Ждём TCP-подключение к прокси...</string>
     <string name="ProxyStatusUnchecked">Не проверено</string>
     <string name="ProxyStatusNotRespondingNow">Сейчас не отвечает</string>
@@ -330,4 +340,6 @@
     <string name="UseProxyWssPath">WSS путь</string>
     <string name="UseProxyWssMiniApps">Mini Apps через WSS</string>
     <string name="UseProxyWssInfo">Свой WSS — это не MTProxy и не SOCKS5. SOCKS5 WSS может также вести Mini Apps, если ваш шлюз поддерживает SOCKS5-поток внутри WebSocket.</string>
+    <string name="WssSocksUpstreamHeader">SOCKS5 upstream для WSS</string>
+    <string name="WssSocksUpstreamInfo">Здесь показываются только SOCKS5. Выбранный SOCKS5 используется внутри SOCKS5 WSS; MTProxy скрыты.</string>
 </resources>

@@ -145,11 +145,13 @@ private:
     void closeSocket(int32_t reason, int32_t error);
     void openConnectionInternal(bool ipv6);
     void adjustWriteOp();
+    void publishProxyConnectionStage(const char *diagnostic);
     bool isCurrentTransportWss();
     bool dispatchWssPayloads(std::vector<std::vector<uint8_t>> &payloads);
-    bool scheduleProxyHandshakeAdmissionIfNeeded(bool ipv6);
+    bool scheduleProxyHandshakeAdmissionIfNeeded(bool ipv6, int32_t timerMode);
     void scheduleProxyHandshakeAdmissionTimer(uint32_t delay, int32_t mode, bool ipv6);
-    void grantProxyHandshakeAdmission(bool ipv6, uint32_t generation, uint32_t delay, const char *reason);
+    void grantProxyHandshakeAdmission(bool ipv6, uint32_t generation, uint32_t delay, int32_t timerMode, const char *reason);
+    void requestPendingHostResolve();
     void cancelProxyHandshakeAdmission();
     void releaseProxyHandshakeAdmission(bool succeeded, const char *reason);
     void rotateMtProxyTlsProfileOnFailureIfNeeded(int32_t reason, int32_t error);

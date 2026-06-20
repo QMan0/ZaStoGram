@@ -72,7 +72,7 @@ public:
     void setIpStrategy(uint8_t value);
     void init(uint32_t version, int32_t layer, int32_t apiId, std::string deviceModel, std::string systemVersion, std::string appVersion, std::string langCode, std::string systemLangCode, std::string configPath, std::string logPath, std::string regId, std::string cFingerprint, std::string installerId, std::string packageId, int32_t timezoneOffset, int64_t userId, bool userPremium, bool isPaused, bool enablePushConnection, bool hasNetwork, int32_t networkType, int32_t performanceClass);
     void setProxySettings(std::string address, uint16_t port, std::string username, std::string password, std::string secret, int32_t mtProxyTlsProfile, int32_t mtProxyClientHelloFragmentation, int32_t mtProxyConnectionPatternMode, int32_t mtProxyRecordSizingMode, int32_t mtProxyTimingMode, int32_t mtProxyStartupCoverMode);
-    void setWssTransportSettings(int32_t mode, int32_t gatewayMode, std::string host, uint16_t port, std::string path, bool miniApps, bool enabled);
+    void setWssTransportSettings(int32_t mode, int32_t gatewayMode, std::string host, uint16_t port, std::string path, bool miniApps, std::string socksHost, uint16_t socksPort, std::string socksUsername, std::string socksPassword, bool socksEnabled, bool enabled);
     void setLangCode(std::string langCode);
     void setRegId(std::string regId);
     void setSystemLangCode(std::string langCode);
@@ -211,6 +211,11 @@ private:
     std::string wssHost = "";
     uint16_t wssPort = 443;
     std::string wssPath = "/apiws";
+    std::string wssSocksHost = "";
+    uint16_t wssSocksPort = 1080;
+    std::string wssSocksUsername = "";
+    std::string wssSocksPassword = "";
+    bool wssSocksEnabled = false;
     bool wssUseForMiniApps = false;
     bool wssEnabled = false;
     int32_t lastPingProxyId = 2000000;

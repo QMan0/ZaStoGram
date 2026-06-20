@@ -26,6 +26,7 @@ jmethodID jclass_ConnectionsManager_onRequestWriteToSocket;
 jmethodID jclass_ConnectionsManager_onUnparsedMessageReceived;
 jmethodID jclass_ConnectionsManager_onUpdate;
 jmethodID jclass_ConnectionsManager_onSessionCreated;
+jmethodID jclass_ConnectionsManager_onProxyConnectionStageChanged;
 jmethodID jclass_ConnectionsManager_onLogout;
 jmethodID jclass_ConnectionsManager_onConnectionStateChanged;
 jmethodID jclass_ConnectionsManager_onInternalPushReceived;
@@ -245,17 +246,29 @@ void setProxySettings(JNIEnv *env, jclass c, jint instanceNum, jstring address, 
     }
 }
 
-void setWssTransportSettings(JNIEnv *env, jclass c, jint instanceNum, jint mode, jint gatewayMode, jstring host, jint port, jstring path, jboolean miniApps, jboolean enabled) {
+void setWssTransportSettings(JNIEnv *env, jclass c, jint instanceNum, jint mode, jint gatewayMode, jstring host, jint port, jstring path, jboolean miniApps, jstring socksHost, jint socksPort, jstring socksUsername, jstring socksPassword, jboolean socksEnabled, jboolean enabled) {
     const char *hostStr = env->GetStringUTFChars(host, 0);
     const char *pathStr = env->GetStringUTFChars(path, 0);
+    const char *socksHostStr = env->GetStringUTFChars(socksHost, 0);
+    const char *socksUsernameStr = env->GetStringUTFChars(socksUsername, 0);
+    const char *socksPasswordStr = env->GetStringUTFChars(socksPassword, 0);
 
-    ConnectionsManager::getInstance(instanceNum).setWssTransportSettings((int32_t) mode, (int32_t) gatewayMode, hostStr, (uint16_t) port, pathStr, miniApps != 0, enabled != 0);
+    ConnectionsManager::getInstance(instanceNum).setWssTransportSettings((int32_t) mode, (int32_t) gatewayMode, hostStr, (uint16_t) port, pathStr, miniApps != 0, socksHostStr, (uint16_t) socksPort, socksUsernameStr, socksPasswordStr, socksEnabled != 0, enabled != 0);
 
     if (hostStr != 0) {
         env->ReleaseStringUTFChars(host, hostStr);
     }
     if (pathStr != 0) {
         env->ReleaseStringUTFChars(path, pathStr);
+    }
+    if (socksHostStr != 0) {
+        env->ReleaseStringUTFChars(socksHost, socksHostStr);
+    }
+    if (socksUsernameStr != 0) {
+        env->ReleaseStringUTFChars(socksUsername, socksUsernameStr);
+    }
+    if (socksPasswordStr != 0) {
+        env->ReleaseStringUTFChars(socksPassword, socksPasswordStr);
     }
 }
 
@@ -363,6 +376,14 @@ class Delegate : public ConnectiosManagerDelegate {
     
     void onConnectionStateChanged(ConnectionState state, int32_t instanceNum) {
         jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onConnectionStateChanged, state, instanceNum);
+    }
+
+    void onProxyConnectionStageChanged(int32_t instanceNum, std::string diagnostic) {
+        jstring diagnosticString = jniEnv[instanceNum]->NewStringUTF(diagnostic.c_str());
+        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onProxyConnectionStageChanged, instanceNum, diagnosticString);
+        if (diagnosticString != nullptr) {
+            jniEnv[instanceNum]->DeleteLocalRef(diagnosticString);
+        }
     }
     
     void onUnparsedMessageReceived(int64_t reqMessageId, NativeByteBuffer *buffer, ConnectionType connectionType, int32_t instanceNum) {
@@ -557,7 +578,7 @@ static JNINativeMethod ConnectionsManagerMethods[] = {
         {"native_bindRequestToGuid", "(III)V", (void *) bindRequestToGuid},
         {"native_applyDatacenterAddress", "(IILjava/lang/String;I)V", (void *) applyDatacenterAddress},
         {"native_setProxySettings", "(ILjava/lang/String;ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;IIIIII)V", (void *) setProxySettings},
-        {"native_setWssTransportSettings", "(IIILjava/lang/String;ILjava/lang/String;ZZ)V", (void *) setWssTransportSettings},
+        {"native_setWssTransportSettings", "(IIILjava/lang/String;ILjava/lang/String;ZLjava/lang/String;ILjava/lang/String;Ljava/lang/String;ZZ)V", (void *) setWssTransportSettings},
         {"native_getConnectionState", "(I)I", (void *) getConnectionState},
         {"native_setUserId", "(IJ)V", (void *) setUserId},
         {"native_init", "(IIIILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IJZZZII)V", (void *) init},
@@ -668,6 +689,10 @@ extern "C" int registerNativeTgNetFunctions(JavaVM *vm, JNIEnv *env) {
     }
     jclass_ConnectionsManager_onConnectionStateChanged = env->GetStaticMethodID(jclass_ConnectionsManager, "onConnectionStateChanged", "(II)V");
     if (jclass_ConnectionsManager_onConnectionStateChanged == 0) {
+        return JNI_FALSE;
+    }
+    jclass_ConnectionsManager_onProxyConnectionStageChanged = env->GetStaticMethodID(jclass_ConnectionsManager, "onProxyConnectionStageChanged", "(ILjava/lang/String;)V");
+    if (jclass_ConnectionsManager_onProxyConnectionStageChanged == 0) {
         return JNI_FALSE;
     }
     jclass_ConnectionsManager_onInternalPushReceived = env->GetStaticMethodID(jclass_ConnectionsManager, "onInternalPushReceived", "(I)V");

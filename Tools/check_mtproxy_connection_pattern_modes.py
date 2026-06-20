@@ -157,6 +157,25 @@ def main() -> None:
         and "mtProxyCooldownBlocksPriority(state, now, connectionPatternMode, proxyHandshakeAdmissionPriority)" in socket_cpp,
         "TCP-fail cooldown must throttle generic/media reconnect storms, not only low-priority download/upload attempts",
     )
+    require(
+        "MT_PROXY_HANDSHAKE_TIMER_HOST_RESOLVE" in socket_cpp
+        and "scheduleProxyHandshakeAdmissionIfNeeded(bool ipv6, int32_t timerMode)" in socket_h
+        and "timerMode" in socket_cpp
+        and "requestPendingHostResolve()" in socket_cpp
+        and "scheduleProxyHandshakeAdmissionIfNeeded(ipv6, MT_PROXY_HANDSHAKE_TIMER_HOST_RESOLVE)" in socket_cpp,
+        "FakeTLS DNS resolution must be admitted before delegate getHostByName, otherwise DNS/TCP failures bypass the browser-like gate",
+    )
+    host_timer_index = socket_cpp.find("if (mode == MT_PROXY_HANDSHAKE_TIMER_HOST_RESOLVE)")
+    host_request_index = socket_cpp.find("requestPendingHostResolve();", host_timer_index)
+    host_method_index = socket_cpp.find("void ConnectionSocket::requestPendingHostResolve()")
+    delegate_index = socket_cpp.find("delegate->getHostByName", host_method_index)
+    require(
+        host_timer_index >= 0
+        and host_request_index >= 0
+        and host_method_index >= 0
+        and delegate_index >= 0,
+        "host-resolve admission timer must start delegate DNS through requestPendingHostResolve",
+    )
     for path in (STRINGS, STRINGS_RU):
         source = text(path)
         require(

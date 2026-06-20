@@ -186,6 +186,16 @@
     <string name="Unavailable">Unavailable</string>
     <string name="ProxyStatusConnectingSlow">Connecting, this can take a moment</string>
     <string name="ProxyStatusCheckingConnection">Checking connection...</string>
+    <string name="ProxyStatusAdmissionQueue">Waiting for proxy connection slot...</string>
+    <string name="ProxyStatusHostResolve">Resolving proxy host...</string>
+    <string name="ProxyStatusConnectStart">Preparing proxy connection...</string>
+    <string name="ProxyStatusTcpConnecting">Opening TCP connection...</string>
+    <string name="ProxyStatusTcpConnected">TCP connected, starting TLS mask...</string>
+    <string name="ProxyStatusClientHelloSent">ClientHello sent, waiting for ServerHello...</string>
+    <string name="ProxyStatusServerHelloOk">ServerHello accepted, starting MTProto...</string>
+    <string name="ProxyStatusMtprotoStarting">MTProxy handshake passed, starting MTProto...</string>
+    <string name="ProxyStatusFirstDataSent">First MTProto data sent...</string>
+    <string name="ProxyStatusFirstDataReceived">First MTProto data received</string>
     <string name="ProxyStatusWaitingTcp">Waiting for TCP connection to proxy...</string>
     <string name="ProxyStatusUnchecked">Not checked</string>
     <string name="ProxyStatusNotRespondingNow">Not responding right now</string>
@@ -10975,4 +10985,6 @@
     <string name="UseProxyWssPath">WSS path</string>
     <string name="UseProxyWssMiniApps">Mini Apps through WSS</string>
     <string name="UseProxyWssInfo">Custom WSS is not MTProxy or SOCKS5. SOCKS5 WSS can also route Mini Apps when your gateway supports a SOCKS5 stream inside WebSocket.</string>
+    <string name="WssSocksUpstreamHeader">SOCKS5 upstream for WSS</string>
+    <string name="WssSocksUpstreamInfo">Only SOCKS5 proxies are shown here. The selected SOCKS5 is used inside SOCKS5 WSS; MTProxy entries stay hidden.</string>
 </resources>

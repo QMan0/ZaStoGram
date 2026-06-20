@@ -7,8 +7,20 @@ import org.telegram.ui.ActionBar.Theme;
 
 public class ProxyCheckDiagnostics {
 
+    private static final long LIVE_PHASE_STALE_MS = 45 * 1000L;
+
     public static final String OK = "ok";
     public static final String CHECKING = "checking";
+    public static final String ADMISSION_QUEUE = "admission_queue";
+    public static final String HOST_RESOLVE_START = "host_resolve_start";
+    public static final String CONNECT_START = "connect_start";
+    public static final String SOCKET_CONNECT_START = "socket_connect_start";
+    public static final String SOCKET_CONNECTED = "socket_connected";
+    public static final String CLIENT_HELLO_SENT = "client_hello_sent";
+    public static final String SERVER_HELLO_HMAC_OK = "server_hello_hmac_ok";
+    public static final String ON_CONNECTED = "on_connected";
+    public static final String FIRST_TLS_APP_SENT = "first_tls_app_sent";
+    public static final String FIRST_TLS_APP_RECV = "first_tls_app_recv";
     public static final String WAITING_TCP = "waiting_tcp";
     public static final String START_FAILED = "start_failed";
     public static final String TCP_NOT_CONNECTED = "tcp_not_connected";
@@ -28,6 +40,16 @@ public class ProxyCheckDiagnostics {
         switch (diagnostic) {
             case OK:
             case CHECKING:
+            case ADMISSION_QUEUE:
+            case HOST_RESOLVE_START:
+            case CONNECT_START:
+            case SOCKET_CONNECT_START:
+            case SOCKET_CONNECTED:
+            case CLIENT_HELLO_SENT:
+            case SERVER_HELLO_HMAC_OK:
+            case ON_CONNECTED:
+            case FIRST_TLS_APP_SENT:
+            case FIRST_TLS_APP_RECV:
             case WAITING_TCP:
             case START_FAILED:
             case TCP_NOT_CONNECTED:
@@ -47,7 +69,32 @@ public class ProxyCheckDiagnostics {
 
     public static boolean isFailure(String diagnostic) {
         String normalized = normalize(diagnostic);
-        return !OK.equals(normalized) && !CHECKING.equals(normalized) && !CANCELLED.equals(normalized);
+        return !OK.equals(normalized) && !CHECKING.equals(normalized) && !CANCELLED.equals(normalized) && !isLivePhase(normalized);
+    }
+
+    public static boolean isLivePhase(String diagnostic) {
+        switch (normalize(diagnostic)) {
+            case ADMISSION_QUEUE:
+            case HOST_RESOLVE_START:
+            case CONNECT_START:
+            case SOCKET_CONNECT_START:
+            case SOCKET_CONNECTED:
+            case CLIENT_HELLO_SENT:
+            case SERVER_HELLO_HMAC_OK:
+            case ON_CONNECTED:
+            case FIRST_TLS_APP_SENT:
+            case FIRST_TLS_APP_RECV:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    public static boolean hasFreshLivePhase(SharedConfig.ProxyInfo proxyInfo) {
+        return proxyInfo != null
+                && proxyInfo.lastCheckDiagnosticTime != 0
+                && android.os.SystemClock.elapsedRealtime() - proxyInfo.lastCheckDiagnosticTime < LIVE_PHASE_STALE_MS
+                && isLivePhase(proxyInfo.lastCheckDiagnostic);
     }
 
     public static boolean hasFreshFailure(SharedConfig.ProxyInfo proxyInfo) {
@@ -66,6 +113,9 @@ public class ProxyCheckDiagnostics {
                 return LocaleController.getString(R.string.Connected);
             }
             if (hasFreshFailure(proxyInfo)) {
+                return shortDiagnosticText(proxyInfo.lastCheckDiagnostic);
+            }
+            if (hasFreshLivePhase(proxyInfo)) {
                 return shortDiagnosticText(proxyInfo.lastCheckDiagnostic);
             }
             if (proxyInfo.checking) {
@@ -104,11 +154,14 @@ public class ProxyCheckDiagnostics {
             }
             return LocaleController.getString(R.string.ProxyWindowStatusReady);
         }
-        if (proxyInfo.checking) {
-            return LocaleController.getString(R.string.ProxyWindowStatusChecking);
-        }
         if (hasFreshFailure(proxyInfo)) {
             return shortDiagnosticText(proxyInfo.lastCheckDiagnostic);
+        }
+        if (hasFreshLivePhase(proxyInfo)) {
+            return shortDiagnosticText(proxyInfo.lastCheckDiagnostic);
+        }
+        if (proxyInfo.checking) {
+            return LocaleController.getString(R.string.ProxyWindowStatusChecking);
         }
         if (currentConnectionState == ConnectionsManager.ConnectionStateConnectingToProxy) {
             return LocaleController.getString(R.string.ProxyStatusWaitingTcp);
@@ -145,6 +198,26 @@ public class ProxyCheckDiagnostics {
                 return LocaleController.getString(R.string.Available);
             case CHECKING:
                 return LocaleController.getString(R.string.ProxyStatusCheckingConnection);
+            case ADMISSION_QUEUE:
+                return LocaleController.getString(R.string.ProxyStatusAdmissionQueue);
+            case HOST_RESOLVE_START:
+                return LocaleController.getString(R.string.ProxyStatusHostResolve);
+            case CONNECT_START:
+                return LocaleController.getString(R.string.ProxyStatusConnectStart);
+            case SOCKET_CONNECT_START:
+                return LocaleController.getString(R.string.ProxyStatusTcpConnecting);
+            case SOCKET_CONNECTED:
+                return LocaleController.getString(R.string.ProxyStatusTcpConnected);
+            case CLIENT_HELLO_SENT:
+                return LocaleController.getString(R.string.ProxyStatusClientHelloSent);
+            case SERVER_HELLO_HMAC_OK:
+                return LocaleController.getString(R.string.ProxyStatusServerHelloOk);
+            case ON_CONNECTED:
+                return LocaleController.getString(R.string.ProxyStatusMtprotoStarting);
+            case FIRST_TLS_APP_SENT:
+                return LocaleController.getString(R.string.ProxyStatusFirstDataSent);
+            case FIRST_TLS_APP_RECV:
+                return LocaleController.getString(R.string.ProxyStatusFirstDataReceived);
             case WAITING_TCP:
                 return LocaleController.getString(R.string.ProxyStatusWaitingTcp);
             case START_FAILED:

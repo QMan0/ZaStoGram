@@ -161,7 +161,7 @@ New-Item -ItemType Directory -Force -Path $deviceLogsDir | Out-Null
 Invoke-Adb shell ls -la $remoteLogDir 2>&1 | Tee-Object -FilePath (Join-Path $sessionDir "device_logs_ls.txt") | Out-Null
 Invoke-Adb pull $remoteLogDir $deviceLogsDir 2>&1 | Tee-Object -FilePath (Join-Path $sessionDir "adb_pull_logs.txt") | Out-Null
 
-$markerPattern = "connection\(0x[0-9a-fA-F]+, account[0-9]+, dc[0-9]+, type [0-9]+\)|connecting via proxy|mtproxy_startup|mtproxy_disconnect|proxy_check_|proxy_check_scheduler|proxy_rotation|client_hello|client_hello_fragment|server_hello|first_tls|tls_alert|recv_eof|admission_|socket_connected|on_connected|TLS response|TLS server hello|TLS pending|ClientHello pending|socket error|EPOLLHUP|EPOLLRDHUP"
+$markerPattern = "connection\(0x[0-9a-fA-F]+, account[0-9]+, dc[0-9]+, type [0-9]+\)|connecting via proxy|mtproxy_startup|mtproxy_disconnect|proxy_connection_stage|proxy_check_|proxy_check_scheduler|proxy_rotation|client_hello|client_hello_fragment|server_hello|first_tls|tls_alert|recv_eof|admission_|socket_connected|on_connected|TLS response|TLS server hello|TLS pending|ClientHello pending|socket error|EPOLLHUP|EPOLLRDHUP"
 $markerPath = Join-Path $sessionDir "mtproxy_markers.txt"
 $textFiles = @(Join-Path $sessionDir "logcat.txt")
 $matches = foreach ($file in $textFiles) {

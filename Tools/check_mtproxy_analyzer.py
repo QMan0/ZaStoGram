@@ -61,6 +61,8 @@ def main():
         handle.write("logcat.txt:13: connection(0x2) mtproxy_startup server_hello_hmac_ok bytes=2219 len1=1210 len2=993 flight=993 extra=0\n")
         handle.write("logcat.txt:14: connection(0x2) mtproxy_startup on_connected tls=1\n")
         handle.write("logcat.txt:15: connection(0x2) mtproxy_startup first_tls_app_recv payload=105\n")
+        handle.write("logcat.txt:15: proxy_connection_stage account=0 phase=client_hello_sent\n")
+        handle.write("logcat.txt:15: proxy_connection_stage account=0 phase=server_hello_hmac_ok\n")
         handle.write(
             "logcat.txt:16: proxy_check_start state=ping_sent ping_id=1 request_token=1 "
             "address=dead.example:443 connection_num=0\n"
@@ -175,6 +177,12 @@ def main():
     require(
         "admission_tcp_failure_cooldown" in result.stdout,
         "analyzer must preserve the pre-ClientHello TCP-failure cooldown marker",
+    )
+    require(
+        "Java live connection stages:" in result.stdout
+        and "client_hello_sent: 1" in result.stdout
+        and "server_hello_hmac_ok: 1" in result.stdout,
+        "analyzer must summarize Java-side live proxy stage updates",
     )
     require(
         "blocked.example:443 client_hello_sent_no_server_hello: 1" in result.stdout,
