@@ -94,36 +94,11 @@ public class ProxyCheckDiagnostics {
     }
 
     public static boolean isFailure(String diagnostic) {
-        String normalized = normalize(diagnostic);
-        return !OK.equals(normalized) && !CHECKING.equals(normalized) && !CANCELLED.equals(normalized) && !isLivePhase(normalized);
+        return ProxyPhasePolicy.isFailure(diagnostic);
     }
 
     public static boolean isLivePhase(String diagnostic) {
-        switch (normalize(diagnostic)) {
-            case ADMISSION_QUEUE:
-            case ENDPOINT_COOLDOWN:
-            case TCP_CONNECT_GATE:
-            case DNS_COALESCE_WAIT:
-            case DNS_CACHE_HIT:
-            case DNS_CACHE_STORE:
-            case PHASE_ADAPTIVE_RECIPE:
-            case HOST_RESOLVE_START:
-            case CONNECT_START:
-            case SOCKET_CONNECT_START:
-            case SOCKET_CONNECTED:
-            case CLIENT_HELLO_SENT:
-            case ADMISSION_HOLD_AFTER_CLIENT_HELLO_FAILURE:
-            case SERVER_HELLO_HMAC_OK:
-            case ON_CONNECTED:
-            case FIRST_TLS_APP_SENT:
-            case FIRST_TLS_APP_RECV:
-            case FIRST_MTPROXY_PACKET_SENT:
-            case FIRST_MTPROXY_PACKET_RECV:
-            case WAITING_TCP:
-                return true;
-            default:
-                return false;
-        }
+        return ProxyPhasePolicy.isLivePhase(diagnostic);
     }
 
     public static boolean isEarlyRetryPhase(String diagnostic) {
@@ -164,20 +139,7 @@ public class ProxyCheckDiagnostics {
     }
 
     public static boolean shouldAccelerateProxyRotation(String diagnostic) {
-        switch (normalize(diagnostic)) {
-            case HOST_RESOLVE_FAILED:
-            case TCP_NOT_CONNECTED:
-            case TCP_CONNECTED_NO_PONG:
-            case NETWORK_BLOCK_SUSPECTED:
-            case CLIENT_HELLO_SENT_NO_SERVER_HELLO:
-            case SERVER_HELLO_HMAC_MISMATCH:
-            case MTPROXY_PACKET_SENT_NO_RESPONSE:
-            case POST_HANDSHAKE_NO_APPDATA:
-            case DROPPED_EARLY_AFTER_APPDATA:
-                return true;
-            default:
-                return false;
-        }
+        return ProxyPhasePolicy.shouldAccelerateProxyRotation(diagnostic);
     }
 
     public static boolean shouldKeepFreshFailure(SharedConfig.ProxyInfo proxyInfo, String incomingDiagnostic) {
@@ -189,13 +151,7 @@ public class ProxyCheckDiagnostics {
     }
 
     public static boolean isProxyUsableSuccessPhase(String diagnostic) {
-        switch (normalize(diagnostic)) {
-            case FIRST_TLS_APP_RECV:
-            case FIRST_MTPROXY_PACKET_RECV:
-                return true;
-            default:
-                return false;
-        }
+        return ProxyPhasePolicy.isProxyUsableSuccessPhase(diagnostic);
     }
 
     public static class HeaderStatusTitle {

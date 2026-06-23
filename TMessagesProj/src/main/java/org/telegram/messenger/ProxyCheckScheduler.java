@@ -7,27 +7,17 @@
 package org.telegram.messenger;
 
 import android.os.SystemClock;
-import android.util.Base64;
 
 import org.telegram.tgnet.ConnectionsManager;
 
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 
 public class ProxyCheckScheduler {
 
-    private static final long PROXY_CHECK_STALE_MS = 2 * 60 * 1000L;
     private static final long PROXY_CHECK_SPACING_MS = 700L;
-    private static final long PROXY_CHECK_FAILURE_BACKOFF_MS = 2 * 60 * 1000L;
-    private static final long PROXY_CHECK_FAILURE_BACKOFF_MAX_MS = 8 * 60 * 1000L;
-    private static final long PROXY_CHECK_LIVE_FAILURE_DEDUP_MS = 1500L;
-    private static final long PROXY_CHECK_CONNECTED_GRACE_MS = 60 * 1000L;
 
     private static final ArrayList<Request> queue = new ArrayList<>();
-    private static final HashMap<String, EndpointState> endpointStates = new HashMap<>();
     private static final Runnable startNextRunnable = ProxyCheckScheduler::startNext;
     private static Request activeRequest;
 
@@ -145,10 +135,10 @@ public class ProxyCheckScheduler {
             return true;
         }
         long now = SystemClock.elapsedRealtime();
-        long nextAllowedTime = nextAllowedCheckTime(proxyInfo);
+        long nextAllowedTime = ProxyRuntimeStateStore.nextAllowedCheckTime(proxyInfo);
         if (nextAllowedTime > now) {
-            markEndpointCooldown(proxyInfo, now);
-            log("skip_backoff endpoint=" + endpoint(proxyInfo) + " wait_ms=" + (nextAllowedTime - now) + " phase=" + lastEndpointDiagnostic(proxyInfo));
+            ProxyRuntimeStateStore.markEndpointCooldown(proxyInfo, now);
+            log("skip_backoff endpoint=" + endpoint(proxyInfo) + " wait_ms=" + (nextAllowedTime - now) + " phase=" + ProxyRuntimeStateStore.lastEndpointDiagnostic(proxyInfo));
             return false;
         }
         if (isFresh(proxyInfo)) {
@@ -158,171 +148,39 @@ public class ProxyCheckScheduler {
     }
 
     public static boolean isFresh(SharedConfig.ProxyInfo proxyInfo) {
-        return proxyInfo != null
-                && proxyInfo.availableCheckTime != 0
-                && SystemClock.elapsedRealtime() - proxyInfo.availableCheckTime < PROXY_CHECK_STALE_MS;
+        return ProxyRuntimeStateStore.isFresh(proxyInfo);
     }
 
     public static boolean isEndpointBackedOff(SharedConfig.ProxyInfo proxyInfo) {
-        if (proxyInfo == null) {
-            return false;
-        }
-        EndpointState state = endpointFailureState(proxyInfo);
-        return state != null
-                && state.consecutiveFailures > 0
-                && nextAllowedCheckTime(proxyInfo) > SystemClock.elapsedRealtime();
+        return ProxyRuntimeStateStore.isEndpointBackedOff(proxyInfo);
     }
 
     public static void markConnected(SharedConfig.ProxyInfo proxyInfo) {
-        if (proxyInfo == null) {
-            return;
-        }
-        boolean changed = proxyInfo.checking || !proxyInfo.available || !isFresh(proxyInfo);
-        boolean preserveFreshProxyPhase = ProxyCheckDiagnostics.hasFreshFailure(proxyInfo) || ProxyCheckDiagnostics.hasFreshLivePhase(proxyInfo);
-        if (!preserveFreshProxyPhase) {
-            proxyInfo.available = true;
-            proxyInfo.availableCheckTime = SystemClock.elapsedRealtime();
-            proxyInfo.lastCheckDiagnostic = ProxyCheckDiagnostics.OK;
-            proxyInfo.lastCheckDiagnosticTime = proxyInfo.availableCheckTime;
-            rememberConnected(proxyInfo);
-        }
-        clearTransientState(proxyInfo);
-        if (changed) {
-            log("mark_connected endpoint=" + endpoint(proxyInfo));
-        }
+        ProxyRuntimeStateStore.markConnected(proxyInfo);
     }
 
     public static void markConnectionStarting(SharedConfig.ProxyInfo proxyInfo) {
-        if (proxyInfo == null) {
-            return;
-        }
-        proxyInfo.lastCheckDiagnostic = ProxyCheckDiagnostics.CONNECT_START;
-        proxyInfo.lastCheckDiagnosticTime = SystemClock.elapsedRealtime();
-        log("mark_connection_starting endpoint=" + endpoint(proxyInfo));
+        ProxyRuntimeStateStore.markConnectionStarting(proxyInfo);
     }
 
     public static void markConnectionUsable(SharedConfig.ProxyInfo proxyInfo, String diagnostic) {
-        if (proxyInfo == null) {
-            return;
-        }
-        long now = SystemClock.elapsedRealtime();
-        proxyInfo.available = true;
-        proxyInfo.availableCheckTime = now;
-        proxyInfo.lastCheckDiagnostic = ProxyCheckDiagnostics.normalize(diagnostic);
-        proxyInfo.lastCheckDiagnosticTime = now;
-        rememberConnected(proxyInfo);
-        clearTransientState(proxyInfo);
-        log("mark_connection_usable endpoint=" + endpoint(proxyInfo) + " phase=" + proxyInfo.lastCheckDiagnostic);
+        ProxyRuntimeStateStore.markConnectionUsable(proxyInfo, diagnostic);
     }
 
     public static void markEndpointFailure(SharedConfig.ProxyInfo proxyInfo, String diagnostic) {
-        if (proxyInfo == null || !ProxyCheckDiagnostics.shouldAccelerateProxyRotation(diagnostic)) {
-            return;
-        }
-        String normalizedDiagnostic = ProxyCheckDiagnostics.normalize(diagnostic);
-        String key = endpointStateKeyForDiagnostic(proxyInfo, normalizedDiagnostic);
-        if (key == null) {
-            return;
-        }
-        EndpointState state = endpointStateForKey(key);
-        long now = SystemClock.elapsedRealtime();
-        if (normalizedDiagnostic.equals(state.lastDiagnostic) && now - state.lastCheckTime < PROXY_CHECK_LIVE_FAILURE_DEDUP_MS) {
-            log("live_failure_dedup endpoint=" + endpoint(proxyInfo) + " phase=" + normalizedDiagnostic);
-            return;
-        }
-        rememberEndpointFailure(state, proxyInfo, normalizedDiagnostic, now, "live_failure");
+        ProxyRuntimeStateStore.markEndpointFailure(proxyInfo, diagnostic);
     }
 
     public static boolean matchesEndpointStageKey(SharedConfig.ProxyInfo proxyInfo, String endpointKey) {
-        if (proxyInfo == null || endpointKey == null || endpointKey.length() == 0) {
-            return false;
-        }
-        return endpointStageKeyForLiveStage(proxyInfo).equals(endpointKey);
+        return ProxyEndpointKey.matchesLiveStage(proxyInfo, endpointKey);
     }
 
     public static String endpointStageKeyForLiveStage(SharedConfig.ProxyInfo proxyInfo) {
-        if (proxyInfo == null) {
-            return "";
-        }
-        byte[] secret = decodedSecretForLiveStage(proxyInfo.secret);
-        String kind = secretKindForLiveStage(secret);
-        if ("none".equals(kind)) {
-            return networkEndpointKeyForLiveStage(proxyInfo);
-        }
-        StringBuilder builder = new StringBuilder();
-        builder.append(normalizeKeyPart(proxyInfo.address, false)).append(":").append(proxyInfo.port).append(":").append(kind);
-        if ("ee".equals(kind)) {
-            String domain = secretDomainForLiveStage(secret);
-            if (domain.length() > 0) {
-                builder.append(":").append(domain);
-            }
-        }
-        return builder.toString();
+        return ProxyEndpointKey.liveStage(proxyInfo);
     }
 
     public static String networkEndpointKeyForLiveStage(SharedConfig.ProxyInfo proxyInfo) {
-        if (proxyInfo == null) {
-            return "";
-        }
-        return normalizeKeyPart(proxyInfo.address, true) + ":" + proxyInfo.port;
-    }
-
-    private static byte[] decodedSecretForLiveStage(String secret) {
-        if (secret == null || secret.length() == 0) {
-            return new byte[0];
-        }
-        boolean allHex = true;
-        for (int i = 0, count = secret.length(); i < count; i++) {
-            char c = secret.charAt(i);
-            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) {
-                allHex = false;
-                break;
-            }
-        }
-        if (allHex) {
-            int size = secret.length() / 2;
-            byte[] result = new byte[size];
-            for (int i = 0; i < size; i++) {
-                int high = Character.digit(secret.charAt(i * 2), 16);
-                int low = Character.digit(secret.charAt(i * 2 + 1), 16);
-                result[i] = (byte) (high * 16 + low);
-            }
-            return result;
-        }
-        int remainder = secret.length() & 3;
-        if (remainder == 1) {
-            return new byte[0];
-        }
-        String padded = secret;
-        if (remainder != 0) {
-            padded += remainder == 2 ? "==" : "=";
-        }
-        try {
-            return Base64.decode(padded, Base64.URL_SAFE | Base64.NO_WRAP);
-        } catch (IllegalArgumentException e) {
-            return new byte[0];
-        }
-    }
-
-    private static String secretKindForLiveStage(byte[] secret) {
-        if (secret == null || secret.length == 0) {
-            return "none";
-        }
-        int first = secret[0] & 0xff;
-        if (secret.length >= 17 && first == 0xdd) {
-            return "dd";
-        }
-        if (secret.length > 17 && first == 0xee) {
-            return "ee";
-        }
-        return "legacy";
-    }
-
-    private static String secretDomainForLiveStage(byte[] secret) {
-        if (secret == null || secret.length <= 17 || (secret[0] & 0xff) != 0xee) {
-            return "";
-        }
-        return new String(secret, 17, secret.length - 17, StandardCharsets.UTF_8);
+        return ProxyEndpointKey.networkLiveStage(proxyInfo);
     }
 
     private static boolean hasPending(SharedConfig.ProxyInfo proxyInfo) {
@@ -344,16 +202,16 @@ public class ProxyCheckScheduler {
     }
 
     private static Request findPending(SharedConfig.ProxyInfo proxyInfo) {
-        String key = endpointKey(proxyInfo);
+        String key = ProxyEndpointKey.exact(proxyInfo);
         if (key == null) {
             return null;
         }
-        if (activeRequest != null && !activeRequest.cancelled && key.equals(endpointKey(activeRequest.proxyInfo))) {
+        if (activeRequest != null && !activeRequest.cancelled && key.equals(ProxyEndpointKey.exact(activeRequest.proxyInfo))) {
             return activeRequest;
         }
         for (int i = 0, count = queue.size(); i < count; i++) {
             Request request = queue.get(i);
-            if (!request.cancelled && key.equals(endpointKey(request.proxyInfo))) {
+            if (!request.cancelled && key.equals(ProxyEndpointKey.exact(request.proxyInfo))) {
                 return request;
             }
         }
@@ -400,17 +258,17 @@ public class ProxyCheckScheduler {
         }
         activeRequest = null;
         String normalizedDiagnostic = normalizedDiagnosticForResult(time, diagnostic);
-        String displayDiagnostic = displayDiagnosticForResult(request, time, normalizedDiagnostic);
-        long appliedTime = appliedTimeForResult(request, time);
-        long callbackTime = callbackTimeForResult(request, time);
+        String displayDiagnostic = ProxyRuntimeStateStore.displayDiagnosticForProxyCheck(request.proxyInfo, time, normalizedDiagnostic);
+        long appliedTime = ProxyRuntimeStateStore.appliedTimeForProxyCheck(request.currentAccount, request.proxyInfo, time);
+        long callbackTime = ProxyRuntimeStateStore.callbackTimeForProxyCheck(request.currentAccount, request.proxyInfo, time);
         log("finish result=" + (callbackTime == -1 ? "fail" : "ok") + " phase=" + normalizedDiagnostic + " diagnostic=" + displayDiagnostic + " time=" + callbackTime + " applied_time=" + appliedTime + " raw_time=" + time + " endpoint=" + endpoint(request.proxyInfo) + " queued=" + queue.size() + " cancelled=" + request.cancelled + " listeners=" + request.activeListenerCount());
-        rememberCheckResult(request, callbackTime, displayDiagnostic);
+        ProxyRuntimeStateStore.rememberProxyCheckResult(request.currentAccount, request.proxyInfo, time, displayDiagnostic);
         for (int i = 0, count = request.listeners.size(); i < count; i++) {
             Listener listener = request.listeners.get(i);
             if (listener.cancelled) {
                 continue;
             }
-            String appliedDiagnostic = appliedDiagnosticForResult(listener.proxyInfo, request, time, displayDiagnostic);
+            String appliedDiagnostic = ProxyRuntimeStateStore.appliedDiagnosticForProxyCheck(request.currentAccount, listener.proxyInfo, time, displayDiagnostic);
             applyMeasuredResult(listener.proxyInfo, appliedTime, appliedDiagnostic);
             NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.proxyCheckDone, listener.proxyInfo);
             if (listener.callback != null) {
@@ -426,167 +284,6 @@ public class ProxyCheckScheduler {
             return ProxyCheckDiagnostics.OK;
         }
         return ProxyCheckDiagnostics.normalize(diagnostic);
-    }
-
-    private static String displayDiagnosticForResult(Request request, long time, String normalizedDiagnostic) {
-        if (time != -1 || !ProxyCheckDiagnostics.TCP_NOT_CONNECTED.equals(normalizedDiagnostic)) {
-            return normalizedDiagnostic;
-        }
-        String previousDiagnostic = lastEndpointDiagnostic(request.proxyInfo);
-        if (ProxyCheckDiagnostics.TCP_NOT_CONNECTED.equals(previousDiagnostic) || ProxyCheckDiagnostics.NETWORK_BLOCK_SUSPECTED.equals(previousDiagnostic)) {
-            return ProxyCheckDiagnostics.NETWORK_BLOCK_SUSPECTED;
-        }
-        return normalizedDiagnostic;
-    }
-
-    private static long appliedTimeForResult(Request request, long time) {
-        if (shouldPreserveConnectedState(request, time)) {
-            log("finish_keep_connected endpoint=" + endpoint(request.proxyInfo));
-            return 0;
-        }
-        return time;
-    }
-
-    private static String appliedDiagnosticForResult(SharedConfig.ProxyInfo proxyInfo, Request request, long time, String displayDiagnostic) {
-        if (!shouldPreserveConnectedState(request, time)) {
-            return displayDiagnostic;
-        }
-        if (hasFreshConcreteProxyPhase(proxyInfo)) {
-            return ProxyCheckDiagnostics.normalize(proxyInfo.lastCheckDiagnostic);
-        }
-        return ProxyCheckDiagnostics.OK;
-    }
-
-    private static boolean hasFreshConcreteProxyPhase(SharedConfig.ProxyInfo proxyInfo) {
-        return ProxyCheckDiagnostics.hasFreshFailure(proxyInfo) || ProxyCheckDiagnostics.hasFreshLivePhase(proxyInfo) || ProxyCheckDiagnostics.hasFreshEndpointCooldown(proxyInfo);
-    }
-
-    private static void markCheckingIfNoFreshConcretePhase(SharedConfig.ProxyInfo proxyInfo) {
-        if (proxyInfo == null || hasFreshConcreteProxyPhase(proxyInfo)) {
-            return;
-        }
-        proxyInfo.lastCheckDiagnostic = ProxyCheckDiagnostics.CHECKING;
-        proxyInfo.lastCheckDiagnosticTime = SystemClock.elapsedRealtime();
-    }
-
-    private static long callbackTimeForResult(Request request, long time) {
-        if (shouldPreserveConnectedState(request, time)) {
-            return -1;
-        }
-        return time;
-    }
-
-    private static boolean shouldPreserveConnectedState(Request request, long time) {
-        return time == -1 && isConnectedCurrentProxy(request.currentAccount, request.proxyInfo);
-    }
-
-    private static boolean isConnectedCurrentProxy(int currentAccount, SharedConfig.ProxyInfo proxyInfo) {
-        if (proxyInfo == null || proxyInfo != SharedConfig.currentProxy) {
-            return false;
-        }
-        int state = ConnectionsManager.getInstance(currentAccount).getConnectionState();
-        return state == ConnectionsManager.ConnectionStateConnected || state == ConnectionsManager.ConnectionStateUpdating;
-    }
-
-    private static long nextAllowedCheckTime(SharedConfig.ProxyInfo proxyInfo) {
-        if (proxyInfo == null) {
-            return 0;
-        }
-        EndpointState exactState = endpointStates.get(endpointKey(proxyInfo));
-        EndpointState networkState = endpointStates.get(endpointNetworkKey(proxyInfo));
-        long exactTime = exactState == null ? 0 : exactState.nextCheckTime;
-        long networkTime = networkState == null ? 0 : networkState.nextCheckTime;
-        return Math.max(exactTime, networkTime);
-    }
-
-    private static String lastEndpointDiagnostic(SharedConfig.ProxyInfo proxyInfo) {
-        if (proxyInfo == null) {
-            return ProxyCheckDiagnostics.UNKNOWN_FAIL;
-        }
-        EndpointState state = latestEndpointState(proxyInfo);
-        if (state == null) {
-            return ProxyCheckDiagnostics.normalize(proxyInfo.lastCheckDiagnostic);
-        }
-        return state.lastDiagnostic;
-    }
-
-    private static void rememberConnected(SharedConfig.ProxyInfo proxyInfo) {
-        String key = endpointKey(proxyInfo);
-        if (key == null) {
-            return;
-        }
-        long now = SystemClock.elapsedRealtime();
-        rememberEndpointConnected(endpointStateForKey(key), now);
-        String networkKey = endpointNetworkKey(proxyInfo);
-        if (networkKey != null && !networkKey.equals(key)) {
-            rememberEndpointConnected(endpointStateForKey(networkKey), now);
-        }
-    }
-
-    private static void rememberCheckResult(Request request, long time, String diagnostic) {
-        String normalizedDiagnostic = ProxyCheckDiagnostics.normalize(diagnostic);
-        String key = time == -1 && !isConnectedCurrentProxy(request.currentAccount, request.proxyInfo)
-                ? endpointStateKeyForDiagnostic(request.proxyInfo, normalizedDiagnostic)
-                : endpointKey(request.proxyInfo);
-        if (key == null) {
-            return;
-        }
-        EndpointState state = endpointStateForKey(key);
-        long now = SystemClock.elapsedRealtime();
-        state.lastDiagnostic = normalizedDiagnostic;
-        state.lastCheckTime = now;
-        if (time != -1 || shouldRememberConnectedCheckResult(request, time)) {
-            rememberEndpointConnected(state, now);
-            String networkKey = endpointNetworkKey(request.proxyInfo);
-            if (networkKey != null && !networkKey.equals(key)) {
-                rememberEndpointConnected(endpointStateForKey(networkKey), now);
-            }
-            return;
-        }
-        if (shouldPreserveConnectedState(request, time)) {
-            log("finish_keep_proxy_phase endpoint=" + endpoint(request.proxyInfo));
-            return;
-        }
-
-        rememberEndpointFailure(state, request.proxyInfo, state.lastDiagnostic, now, "proxy_check");
-    }
-
-    private static boolean shouldRememberConnectedCheckResult(Request request, long time) {
-        return shouldPreserveConnectedState(request, time) && !hasFreshConcreteProxyPhase(request.proxyInfo);
-    }
-
-    private static void rememberEndpointConnected(EndpointState state, long now) {
-        state.consecutiveFailures = 0;
-        state.lastDiagnostic = ProxyCheckDiagnostics.OK;
-        state.lastCheckTime = now;
-        state.nextCheckTime = now + PROXY_CHECK_CONNECTED_GRACE_MS;
-    }
-
-    private static void rememberEndpointFailure(EndpointState state, SharedConfig.ProxyInfo proxyInfo, String diagnostic, long now, String source) {
-        state.lastDiagnostic = ProxyCheckDiagnostics.normalize(diagnostic);
-        state.lastCheckTime = now;
-        state.consecutiveFailures++;
-        long multiplier = 1L << Math.min(2, Math.max(0, state.consecutiveFailures - 1));
-        long backoff = Math.min(PROXY_CHECK_FAILURE_BACKOFF_MAX_MS, PROXY_CHECK_FAILURE_BACKOFF_MS * multiplier);
-        state.nextCheckTime = now + backoff;
-        log("backoff endpoint=" + endpoint(proxyInfo) + " wait_ms=" + backoff + " failures=" + state.consecutiveFailures + " phase=" + state.lastDiagnostic + " source=" + source);
-    }
-
-    private static void markEndpointCooldown(SharedConfig.ProxyInfo proxyInfo, long now) {
-        if (hasFreshConcreteProxyPhase(proxyInfo)) {
-            return;
-        }
-        proxyInfo.lastCheckDiagnostic = ProxyCheckDiagnostics.ENDPOINT_COOLDOWN;
-        proxyInfo.lastCheckDiagnosticTime = now;
-    }
-
-    private static EndpointState endpointStateForKey(String key) {
-        EndpointState state = endpointStates.get(key);
-        if (state == null) {
-            state = new EndpointState();
-            endpointStates.put(key, state);
-        }
-        return state;
     }
 
     private static void notifyRequestFinishedIfDrained(Request request) {
@@ -648,84 +345,7 @@ public class ProxyCheckScheduler {
     }
 
     private static String endpoint(SharedConfig.ProxyInfo proxyInfo) {
-        if (proxyInfo == null) {
-            return "null";
-        }
-        return proxyInfo.address + ":" + proxyInfo.port;
-    }
-
-    private static String endpointKey(SharedConfig.ProxyInfo proxyInfo) {
-        if (proxyInfo == null) {
-            return null;
-        }
-        StringBuilder builder = new StringBuilder();
-        appendKeyPart(builder, normalizeKeyPart(proxyInfo.address, true));
-        appendKeyPart(builder, String.valueOf(proxyInfo.port));
-        appendKeyPart(builder, normalizeKeyPart(proxyInfo.username, false));
-        appendKeyPart(builder, normalizeKeyPart(proxyInfo.password, false));
-        appendKeyPart(builder, normalizeKeyPart(proxyInfo.secret, false));
-        return builder.toString();
-    }
-
-    private static String endpointNetworkKey(SharedConfig.ProxyInfo proxyInfo) {
-        if (proxyInfo == null) {
-            return null;
-        }
-        StringBuilder builder = new StringBuilder();
-        appendKeyPart(builder, normalizeKeyPart(proxyInfo.address, true));
-        appendKeyPart(builder, String.valueOf(proxyInfo.port));
-        return builder.toString();
-    }
-
-    private static String endpointStateKeyForDiagnostic(SharedConfig.ProxyInfo proxyInfo, String diagnostic) {
-        switch (ProxyCheckDiagnostics.normalize(diagnostic)) {
-            case ProxyCheckDiagnostics.HOST_RESOLVE_FAILED:
-            case ProxyCheckDiagnostics.TCP_NOT_CONNECTED:
-            case ProxyCheckDiagnostics.NETWORK_BLOCK_SUSPECTED:
-            case ProxyCheckDiagnostics.TCP_CONNECTED_NO_PONG:
-            case ProxyCheckDiagnostics.MTPROXY_PACKET_SENT_NO_RESPONSE:
-            case ProxyCheckDiagnostics.DROPPED_EARLY_AFTER_APPDATA:
-                return endpointNetworkKey(proxyInfo);
-            default:
-                return endpointKey(proxyInfo);
-        }
-    }
-
-    private static EndpointState latestEndpointState(SharedConfig.ProxyInfo proxyInfo) {
-        EndpointState exactState = endpointStates.get(endpointKey(proxyInfo));
-        EndpointState networkState = endpointStates.get(endpointNetworkKey(proxyInfo));
-        if (exactState == null) {
-            return networkState;
-        }
-        if (networkState == null) {
-            return exactState;
-        }
-        return networkState.lastCheckTime > exactState.lastCheckTime ? networkState : exactState;
-    }
-
-    private static EndpointState endpointFailureState(SharedConfig.ProxyInfo proxyInfo) {
-        EndpointState exactState = endpointStates.get(endpointKey(proxyInfo));
-        EndpointState networkState = endpointStates.get(endpointNetworkKey(proxyInfo));
-        boolean exactBackoff = exactState != null && exactState.consecutiveFailures > 0;
-        boolean networkBackoff = networkState != null && networkState.consecutiveFailures > 0;
-        if (!exactBackoff) {
-            return networkBackoff ? networkState : null;
-        }
-        if (!networkBackoff) {
-            return exactState;
-        }
-        return networkState.nextCheckTime > exactState.nextCheckTime ? networkState : exactState;
-    }
-
-    private static String normalizeKeyPart(String value, boolean lowerCase) {
-        if (value == null) {
-            return "";
-        }
-        return lowerCase ? value.toLowerCase(Locale.US) : value;
-    }
-
-    private static void appendKeyPart(StringBuilder builder, String value) {
-        builder.append(value.length()).append(':').append(value);
+        return ProxyEndpointKey.endpoint(proxyInfo);
     }
 
     private static class Request {
@@ -821,14 +441,14 @@ public class ProxyCheckScheduler {
         void setChecking(boolean checking) {
             proxyInfo.checking = checking;
             if (checking) {
-                markCheckingIfNoFreshConcretePhase(proxyInfo);
+                ProxyRuntimeStateStore.markCheckingIfNoFreshConcretePhase(proxyInfo);
             }
             for (int i = 0, count = listeners.size(); i < count; i++) {
                 Listener listener = listeners.get(i);
                 if (!listener.cancelled) {
                     listener.proxyInfo.checking = checking;
                     if (checking) {
-                        markCheckingIfNoFreshConcretePhase(listener.proxyInfo);
+                        ProxyRuntimeStateStore.markCheckingIfNoFreshConcretePhase(listener.proxyInfo);
                     }
                 }
             }
@@ -843,13 +463,6 @@ public class ProxyCheckScheduler {
                 }
             }
         }
-    }
-
-    private static class EndpointState {
-        long nextCheckTime;
-        long lastCheckTime;
-        int consecutiveFailures;
-        String lastDiagnostic = ProxyCheckDiagnostics.UNKNOWN_FAIL;
     }
 
     private static class Listener {

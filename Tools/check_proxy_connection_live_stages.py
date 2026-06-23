@@ -10,6 +10,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 FILES = {
     "diagnostics": ROOT / "TMessagesProj/src/main/java/org/telegram/messenger/ProxyCheckDiagnostics.java",
+    "policy": ROOT / "TMessagesProj/src/main/java/org/telegram/messenger/ProxyPhasePolicy.java",
+    "store": ROOT / "TMessagesProj/src/main/java/org/telegram/messenger/ProxyRuntimeStateStore.java",
+    "endpoint_key": ROOT / "TMessagesProj/src/main/java/org/telegram/messenger/ProxyEndpointKey.java",
     "connections_java": ROOT / "TMessagesProj/src/main/java/org/telegram/tgnet/ConnectionsManager.java",
     "notification_center": ROOT / "TMessagesProj/src/main/java/org/telegram/messenger/NotificationCenter.java",
     "proxy_list": ROOT / "TMessagesProj/src/main/java/org/telegram/ui/ProxyListActivity.java",
@@ -156,15 +159,16 @@ def main() -> None:
         and "isFailure(proxyInfo.lastCheckDiagnostic)" in has_failure_body,
         "fresh failure phases must use diagnostic timestamp, not only proxy-check availability timestamp",
     )
+    store_text = text("store")
     require(
-        "ProxyCheckDiagnostics.isFailure(normalizedDiagnostic)" in text("connections_java")
-        and "!ProxyCheckDiagnostics.UNKNOWN_FAIL.equals(normalizedDiagnostic)" in text("connections_java"),
+        "ProxyPhasePolicy.isFailure(event.phase)" in store_text
+        and "!ProxyCheckDiagnostics.UNKNOWN_FAIL.equals(event.phase)" in store_text,
         "current proxy stage callback must accept concrete failure phases while rejecting unknown_fail noise",
     )
     require(
         "shouldKeepFreshFailure" in diagnostics
         and "isEarlyRetryPhase" in diagnostics
-        and "ProxyCheckDiagnostics.shouldKeepFreshFailure(currentProxy, normalizedDiagnostic)" in text("connections_java"),
+        and "ProxyCheckDiagnostics.shouldKeepFreshFailure(currentProxy, event.phase)" in store_text,
         "fresh terminal failures must not be overwritten by early retry phases such as admission_queue or host_resolve_start",
     )
     require(
@@ -173,28 +177,28 @@ def main() -> None:
         and "FIRST_MTPROXY_PACKET_RECV" in diagnostics,
         "ProxyCheckDiagnostics must define concrete data-path success phases that prove a proxy is usable again",
     )
-    usable_method = diagnostics[diagnostics.find("public static boolean isProxyUsableSuccessPhase"):]
-    usable_method = usable_method[:usable_method.find("\n    public static", 1)]
+    usable_method = text("policy")
     require(
-        "SERVER_HELLO_HMAC_OK" not in usable_method
-        and "FIRST_TLS_APP_RECV" in usable_method
-        and "FIRST_MTPROXY_PACKET_RECV" in usable_method,
+        "case ProxyCheckDiagnostics.SERVER_HELLO_HMAC_OK:" in usable_method
+        and "case ProxyCheckDiagnostics.FIRST_TLS_APP_RECV:" in usable_method
+        and "case ProxyCheckDiagnostics.FIRST_MTPROXY_PACKET_RECV:" in usable_method
+        and "return success(KeyScope.EXACT);" in usable_method
+        and "return success(KeyScope.NETWORK);" in usable_method,
         "server_hello_hmac_ok must remain a handshake live phase, not a data-path usable success",
     )
     require(
-        "ProxyCheckDiagnostics.isProxyUsableSuccessPhase(normalizedDiagnostic)" in text("connections_java")
-        and "ProxyCheckScheduler.markConnectionUsable(currentProxy, normalizedDiagnostic)" in text("connections_java"),
+        "ProxyPhasePolicy.isProxyUsableSuccessPhase(event.phase)" in store_text
+        and "markConnectionUsable(currentProxy, event.phase, event.timestamp)" in store_text,
         "concrete success phases from native must clear stale Java endpoint backoff and fresh terminal failures",
     )
     require(
-        "markCheckingIfNoFreshConcretePhase(proxyInfo);" in text("scheduler")
-        and "markCheckingIfNoFreshConcretePhase(listener.proxyInfo);" in text("scheduler")
-        and "hasFreshConcreteProxyPhase(proxyInfo)" in text("scheduler"),
+        "ProxyRuntimeStateStore.markCheckingIfNoFreshConcretePhase(proxyInfo);" in text("scheduler")
+        and "ProxyRuntimeStateStore.markCheckingIfNoFreshConcretePhase(listener.proxyInfo);" in text("scheduler")
+        and "hasFreshConcreteProxyPhase(SharedConfig.ProxyInfo proxyInfo)" in store_text,
         "background proxy-check must not overwrite a fresh live/failure phase of the selected proxy with generic checking",
     )
-    scheduler_text = text("scheduler")
-    cooldown_idx = scheduler_text.find("private static void markEndpointCooldown")
-    cooldown_body = scheduler_text[cooldown_idx:scheduler_text.find("private static EndpointState endpointStateForKey", cooldown_idx)]
+    cooldown_idx = store_text.find("public static void markEndpointCooldown")
+    cooldown_body = store_text[cooldown_idx:store_text.find("public static void markCheckingIfNoFreshConcretePhase", cooldown_idx)]
     require(
         cooldown_idx >= 0
         and "hasFreshConcreteProxyPhase(proxyInfo)" in cooldown_body
@@ -202,28 +206,27 @@ def main() -> None:
         "endpoint cooldown must not overwrite a fresher concrete proxy phase",
     )
     require(
-        "boolean selectedAccountStage = currentAccount == UserConfig.selectedAccount;" in text("connections_java")
-        and "boolean stageTargetsCurrentProxy = currentProxy != null && concreteDiagnostic && currentProxyMatchesStage;" in text("connections_java")
-        and "if (selectedAccountStage && stageTargetsCurrentProxy)" in text("connections_java"),
+        "boolean selectedAccountStage = event.account == UserConfig.selectedAccount;" in store_text
+        and "boolean stageTargetsCurrentProxy = currentProxy != null && concretePhase && ProxyEndpointKey.matchesLiveStage(currentProxy, event.endpointKey);" in store_text
+        and "if (selectedAccountStage && ProxyPhasePolicy.canOverwriteVisible(event.phase))" in store_text,
         "native proxy live stages from background accounts must not overwrite the shared visible proxy diagnostic",
     )
-    stage_callback = text("connections_java")
-    stage_callback = stage_callback[
-        stage_callback.find("public static void onProxyConnectionStageChanged"):
-        stage_callback.find("public static void onLogout", stage_callback.find("public static void onProxyConnectionStageChanged"))
+    stage_callback = store_text[
+        store_text.find("public static Decision onNativeStage"):
+        store_text.find("public static boolean isFresh", store_text.find("public static Decision onNativeStage"))
     ]
-    mark_failure_idx = stage_callback.find("ProxyCheckScheduler.markEndpointFailure(currentProxy, normalizedDiagnostic);")
-    selected_ui_idx = stage_callback.find("if (selectedAccountStage && stageTargetsCurrentProxy)")
+    mark_failure_idx = stage_callback.find("rememberLiveFailure(currentProxy, event.phase, event.timestamp);")
+    selected_ui_idx = stage_callback.find("if (selectedAccountStage && ProxyPhasePolicy.canOverwriteVisible(event.phase))")
     require(
         mark_failure_idx >= 0
         and selected_ui_idx >= 0
-        and mark_failure_idx < selected_ui_idx,
-        "terminal endpoint failures from any account must update shared backoff before selected-account UI filtering",
+        and mark_failure_idx > selected_ui_idx,
+        "terminal endpoint failures from any account must update shared backoff outside selected-account UI filtering",
     )
     require(
         "final String endpointKey" in text("connections_java")
-        and "boolean currentProxyMatchesStage = ProxyCheckScheduler.matchesEndpointStageKey(currentProxy, endpointKey);" in text("connections_java")
-        and "if (selectedAccountStage && stageTargetsCurrentProxy)" in text("connections_java"),
+        and "ProxyConnectionEvent.nativeStage(currentAccount, diagnostic, endpointKey)" in text("connections_java")
+        and "ProxyEndpointKey.matchesLiveStage(currentProxy, event.endpointKey)" in store_text,
         "native proxy live stages from stale endpoint/secret keys must not overwrite the currently selected proxy diagnostic",
     )
     require(
@@ -265,11 +268,11 @@ def main() -> None:
     require(
         "public static boolean matchesEndpointStageKey" in text("scheduler")
         and "endpointStageKeyForLiveStage" in text("scheduler")
-        and "decodedSecretForLiveStage" in text("scheduler")
+        and "decodedSecretForLiveStage" in text("endpoint_key")
         and "if (args == null || args.length < 2 || !(args[1] instanceof String))" in text("proxy_list")
         and "ProxyCheckScheduler.matchesEndpointStageKey(selectedProxy, endpointKey)" in text("proxy_list")
-        and "ProxyCheckScheduler.matchesEndpointStageKey(SharedConfig.currentProxy, (String) args[1])" in text("rotation")
-        and "currentProxyMatchesStage" in text("connections_java"),
+        and "ProxyRuntimeStateStore.shouldScheduleFallback(account, diagnostic, (String) args[1])" in text("rotation")
+        and "decision=ignored_stale_endpoint" in text("store"),
         "UI and Java lifecycle code must ignore proxy live stages from stale endpoint/secret keys",
     )
     require(

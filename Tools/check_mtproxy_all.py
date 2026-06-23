@@ -20,6 +20,7 @@ CHECKS = [
     "check_mtproxy_resilience_contract.py",
     "check_mtproxy_rotation_and_soft_mux.py",
     "check_proxy_connection_live_stages.py",
+    "check_proxy_control_plane_policy.py",
     "check_proxy_check_diagnostics.py",
     "check_proxy_ui_messages.py",
     "check_proxy_check_scheduler.py",

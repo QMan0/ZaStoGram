@@ -8,6 +8,9 @@ from mtproxy_phase_contract import ENDPOINT_NETWORK, endpoint_key_phases, rotati
 ROOT = Path(__file__).resolve().parents[1]
 
 SCHEDULER = ROOT / "TMessagesProj/src/main/java/org/telegram/messenger/ProxyCheckScheduler.java"
+STORE = ROOT / "TMessagesProj/src/main/java/org/telegram/messenger/ProxyRuntimeStateStore.java"
+ENDPOINT_KEY = ROOT / "TMessagesProj/src/main/java/org/telegram/messenger/ProxyEndpointKey.java"
+POLICY = ROOT / "TMessagesProj/src/main/java/org/telegram/messenger/ProxyPhasePolicy.java"
 PROXY_LIST = ROOT / "TMessagesProj/src/main/java/org/telegram/ui/ProxyListActivity.java"
 PROXY_SETTINGS = ROOT / "TMessagesProj/src/main/java/org/telegram/ui/ProxySettingsActivity.java"
 ANDROID_UTILITIES = ROOT / "TMessagesProj/src/main/java/org/telegram/messenger/AndroidUtilities.java"
@@ -18,12 +21,12 @@ README = ROOT / "README.md"
 
 checks = [
     (SCHEDULER, "PROXY_CHECK_SPACING_MS", "scheduler must space background proxy checks"),
-    (SCHEDULER, "PROXY_CHECK_FAILURE_BACKOFF_MS", "scheduler must back off repeated failed endpoint checks"),
-    (SCHEDULER, "PROXY_CHECK_LIVE_FAILURE_DEDUP_MS", "scheduler must deduplicate repeated live terminal stages from the same native close"),
-    (SCHEDULER, "PROXY_CHECK_CONNECTED_GRACE_MS", "scheduler must avoid rechecking a recently connected endpoint"),
+    (STORE, "PROXY_CHECK_FAILURE_BACKOFF_MS", "runtime store must back off repeated failed endpoint checks"),
+    (STORE, "PROXY_CHECK_LIVE_FAILURE_DEDUP_MS", "runtime store must deduplicate repeated live terminal stages from the same native close"),
+    (STORE, "PROXY_CHECK_CONNECTED_GRACE_MS", "runtime store must avoid rechecking a recently connected endpoint"),
     (SCHEDULER, "activeRequest", "scheduler must keep a single active background check"),
-    (SCHEDULER, "EndpointState", "scheduler must keep per-endpoint check state outside mutable ProxyInfo rows"),
-    (SCHEDULER, "endpointStates", "scheduler must remember endpoint cooldowns across UI/rotation sweeps"),
+    (STORE, "EndpointState", "runtime store must keep per-endpoint check state outside mutable ProxyInfo rows"),
+    (STORE, "endpointStates", "runtime store must remember endpoint cooldowns across UI/rotation sweeps"),
     (SCHEDULER, "enqueueStale", "scheduler must expose stale-check enqueueing"),
     (SCHEDULER, "enqueueNow", "scheduler must expose priority manual checks so GUI does not bypass the shared queue"),
     (SCHEDULER, "owner == null", "scheduler must reject ownerless checks because they cannot be cancelled or drained reliably"),
@@ -32,25 +35,25 @@ checks = [
     (SCHEDULER, "markConnectionStarting", "scheduler must expose a single path for explicit current-proxy reconnect attempts"),
     (SCHEDULER, "markConnectionUsable", "scheduler must expose a concrete native-success path that clears stale endpoint backoff"),
     (SCHEDULER, "markEndpointFailure", "scheduler must expose a single path for real current-connection endpoint failures"),
-    (SCHEDULER, "nextAllowedCheckTime", "scheduler must expose a single debounce policy for UI and rotation"),
+    (STORE, "nextAllowedCheckTime", "runtime store must expose a single debounce policy for UI and rotation"),
     (SCHEDULER, "isEndpointBackedOff", "scheduler must expose endpoint backoff state so rotation cannot bypass it"),
-    (SCHEDULER, "rememberCheckResult", "scheduler must update endpoint cooldowns from measured check results"),
-    (SCHEDULER, "displayDiagnosticForResult", "scheduler must translate repeated TCP failures into a user-facing network-block phase"),
+    (STORE, "rememberProxyCheckResult", "runtime store must update endpoint cooldowns from measured check results"),
+    (STORE, "displayDiagnosticForProxyCheck", "runtime store must translate repeated TCP failures into a user-facing network-block phase"),
     (SCHEDULER, "skip_backoff", "scheduler must log when a repeated endpoint check is intentionally suppressed"),
-    (SCHEDULER, "endpointKey", "scheduler must deduplicate checks by proxy endpoint, not ProxyInfo object identity"),
-    (SCHEDULER, "endpointNetworkKey", "scheduler must keep host/port state for pre-TLS endpoint failures"),
-    (SCHEDULER, "endpointStateKeyForDiagnostic", "scheduler must choose endpoint backoff key by failure phase"),
-    (SCHEDULER, "toLowerCase(Locale.US)", "scheduler endpoint key must normalize host names without device-locale surprises"),
-    (SCHEDULER, "normalizeKeyPart", "scheduler endpoint key must handle null endpoint fields before lowercasing"),
-    (SCHEDULER, "appendKeyPart", "scheduler endpoint key must encode fields without delimiter collisions"),
+    (SCHEDULER, "ProxyEndpointKey.exact", "scheduler must deduplicate checks by proxy endpoint, not ProxyInfo object identity"),
+    (ENDPOINT_KEY, "network(SharedConfig.ProxyInfo", "endpoint key helper must keep host/port state for pre-TLS endpoint failures"),
+    (POLICY, "KeyScope.NETWORK", "phase policy must choose endpoint backoff key by failure phase"),
+    (ENDPOINT_KEY, "toLowerCase(Locale.US)", "endpoint key helper must normalize host names without device-locale surprises"),
+    (ENDPOINT_KEY, "normalizeKeyPart", "endpoint key helper must handle null endpoint fields before lowercasing"),
+    (ENDPOINT_KEY, "appendKeyPart", "endpoint key helper must encode fields without delimiter collisions"),
     (SCHEDULER, "attachPending", "scheduler must attach GUI listeners to an existing endpoint check instead of starting duplicates"),
     (SCHEDULER, "attachPending(proxyInfo, owner, callback, true)", "manual checks must force-upgrade an existing queued endpoint check"),
     (SCHEDULER, "request.force = request.force || force", "attached manual listeners must upgrade pending requests to forced checks"),
     (SCHEDULER, "ArrayList<Listener>", "scheduler must support multiple owners/listeners for one endpoint check"),
     (SCHEDULER, "applyMeasuredResult", "scheduler must copy measured checked results to attached ProxyInfo instances"),
-    (SCHEDULER, "appliedTimeForResult", "scheduler must normalize check results before applying them to UI state"),
-    (SCHEDULER, "callbackTimeForResult", "scheduler must keep measured callback result separate from preserved connected state"),
-    (SCHEDULER, "isConnectedCurrentProxy", "scheduler must not let background check failures overwrite the currently connected proxy"),
+    (STORE, "appliedTimeForProxyCheck", "runtime store must normalize check results before applying them to UI state"),
+    (STORE, "callbackTimeForProxyCheck", "runtime store must keep measured callback result separate from preserved connected state"),
+    (STORE, "isConnectedCurrentProxy", "runtime store must not let background check failures overwrite the currently connected proxy"),
     (SCHEDULER, "nativePingId", "scheduler must keep native cancellation state outside mutable UI ProxyInfo objects"),
     (SCHEDULER, "notifyRequestFinishedIfDrained", "scheduler must notify every listener when a coalesced request is skipped or drained"),
     (SCHEDULER, "notifiedOwners", "scheduler must emit at most one drain callback per owner for a coalesced endpoint"),
@@ -78,24 +81,24 @@ checks = [
     (PROXY_LIST, "ProxyCheckScheduler.cancelOwner(this)", "proxy list must cancel queued checks on destroy"),
     (PROXY_SETTINGS, "ProxyCheckScheduler.markConnectionStarting(currentProxyInfo)", "proxy settings save must clear stale visible failures before applying enabled proxy settings"),
     (ANDROID_UTILITIES, "ProxyCheckScheduler.markConnectionStarting(SharedConfig.currentProxy)", "proxy link add/apply must clear stale visible failures before applying enabled proxy settings"),
-    (ROTATION, "ProxyCheckScheduler.isFresh", "proxy rotation must not switch to stale availability results"),
-    (ROTATION, "ProxyCheckScheduler.markConnected(SharedConfig.currentProxy)", "proxy rotation must share connected-state freshness with the scheduler"),
-    (ROTATION, "ProxyCheckScheduler.markConnectionStarting(info)", "proxy rotation must publish a fresh starting phase before applying a fallback proxy"),
+    (ROTATION, "ProxyRuntimeStateStore.isFresh", "proxy rotation must not switch to stale availability results"),
+    (ROTATION, "ProxyRuntimeStateStore.markConnected(SharedConfig.currentProxy)", "proxy rotation must share connected-state freshness with the runtime store"),
+    (ROTATION, "ProxyRuntimeStateStore.markConnectionStarting(info)", "proxy rotation must publish a fresh starting phase before applying a fallback proxy"),
     (ROTATION, "selectFallbackCandidate", "proxy rotation must try one unchecked endpoint through a real connection instead of full-list proxy checks"),
     (ROTATION, "switch fallback endpoint=", "proxy rotation must log one-at-a-time fallback switches distinctly"),
     (ROTATION, "isCheckScheduled", "proxy rotation must not schedule duplicate delayed sweeps"),
     (ROTATION, "TERMINAL_STAGE_SWITCH_DELAY_MS", "proxy rotation must accelerate fallback after terminal MTProxy startup phases"),
     (ROTATION, "NotificationCenter.proxyConnectionStageChanged", "proxy rotation must observe concrete MTProxy startup stages"),
-    (ROTATION, "ProxyCheckDiagnostics.shouldAccelerateProxyRotation", "proxy rotation must use the shared diagnostic map to decide terminal phases"),
-    (JAVA_MANAGER, "ProxyCheckScheduler.markEndpointFailure(currentProxy, normalizedDiagnostic)", "current proxy live terminal stages must update scheduler endpoint backoff"),
+    (ROTATION, "ProxyRuntimeStateStore.shouldScheduleFallback", "proxy rotation must use the runtime store to decide terminal phases"),
+    (JAVA_MANAGER, "ProxyRuntimeStateStore.onNativeStage(event)", "current proxy live terminal stages must update runtime endpoint backoff"),
     (ROTATION, "proxy_rotation ", "proxy rotation must emit stable diagnostics"),
     (ROTATION, "scheduled_check skipped background_disabled", "proxy rotation must not launch a full proxy-check sweep while connection is already trying"),
     (DIAGNOSTICS, "hasFreshEndpointCooldown", "proxy diagnostics must expose fresh endpoint cooldown as a rotation blocker"),
     (DIAGNOSTICS, "hasFreshUnresolvedLivePhase", "proxy diagnostics must expose unresolved live phases as rotation blockers"),
     (DIAGNOSTICS, "shouldAccelerateProxyRotation", "proxy diagnostics must expose terminal startup phases that should accelerate fallback rotation"),
-    (ROTATION, "ProxyCheckDiagnostics.hasFreshEndpointCooldown(info)", "proxy rotation must not fallback-switch to an endpoint still in native cooldown"),
-    (ROTATION, "ProxyCheckDiagnostics.hasFreshUnresolvedLivePhase(info)", "proxy rotation must not fallback-switch to an endpoint still proving its proxy data path"),
-    (ROTATION, "ProxyCheckScheduler.isEndpointBackedOff(info)", "proxy rotation must not fallback-switch to an endpoint still in scheduler backoff"),
+    (STORE, "ProxyCheckDiagnostics.hasFreshEndpointCooldown(info)", "proxy rotation must not fallback-switch to an endpoint still in native cooldown"),
+    (STORE, "ProxyCheckDiagnostics.hasFreshUnresolvedLivePhase(info)", "proxy rotation must not fallback-switch to an endpoint still proving its proxy data path"),
+    (STORE, "isEndpointBackedOff(info)", "proxy rotation must not fallback-switch to an endpoint still in scheduler backoff"),
     (README, "Java backoff использует ту же фазовую идею ключей", "README must document Java scheduler phase-aware endpoint keys"),
     (README, "host:port:username:password:secret", "README must document exact-key proxy-check coalescing"),
     (README, "generic `Connected`", "README must document that generic connected-state observations do not erase fresh terminal proxy phases"),
@@ -118,43 +121,45 @@ if failed:
     sys.exit(1)
 
 scheduler_text = SCHEDULER.read_text(encoding="utf-8")
+store_text = STORE.read_text(encoding="utf-8")
+endpoint_key_text = ENDPOINT_KEY.read_text(encoding="utf-8")
 if "request.proxyInfo == proxyInfo" in scheduler_text:
     print("Proxy check scheduler guard failed:")
     print(f" - {SCHEDULER.relative_to(ROOT)}: pending checks must be matched by endpoint key, not ProxyInfo object identity")
     sys.exit(1)
-if "proxyInfo.address.toLowerCase(Locale.US)" in scheduler_text:
+if "proxyInfo.address.toLowerCase(Locale.US)" in endpoint_key_text:
     print("Proxy check scheduler guard failed:")
-    print(f" - {SCHEDULER.relative_to(ROOT)}: endpointKey must normalize null host values before lowercasing")
+    print(f" - {ENDPOINT_KEY.relative_to(ROOT)}: endpointKey must normalize null host values before lowercasing")
     sys.exit(1)
 if "if (proxyInfo == null || owner == null)" not in scheduler_text or "if (proxyList == null || owner == null)" not in scheduler_text:
     print("Proxy check scheduler guard failed:")
     print(f" - {SCHEDULER.relative_to(ROOT)}: enqueueNow/enqueueStale must reject ownerless checks at the public API boundary")
     sys.exit(1)
-if "long appliedTime = appliedTimeForResult(request, time);" not in scheduler_text or "long callbackTime = callbackTimeForResult(request, time);" not in scheduler_text:
+if "long appliedTime = ProxyRuntimeStateStore.appliedTimeForProxyCheck(request.currentAccount, request.proxyInfo, time);" not in scheduler_text or "long callbackTime = ProxyRuntimeStateStore.callbackTimeForProxyCheck(request.currentAccount, request.proxyInfo, time);" not in scheduler_text:
     print("Proxy check scheduler guard failed:")
     print(f" - {SCHEDULER.relative_to(ROOT)}: finishRequest must separate applied state from callback result")
     sys.exit(1)
-mark_connected_start = scheduler_text.find("public static void markConnected")
-mark_connected_end = scheduler_text.find("public static void markEndpointFailure", mark_connected_start)
-mark_connected_body = scheduler_text[mark_connected_start:mark_connected_end]
+mark_connected_start = store_text.find("public static void markConnected")
+mark_connected_end = store_text.find("public static void markConnectionStarting", mark_connected_start)
+mark_connected_body = store_text[mark_connected_start:mark_connected_end]
 if (
-    "boolean preserveFreshProxyPhase = ProxyCheckDiagnostics.hasFreshFailure(proxyInfo) || ProxyCheckDiagnostics.hasFreshLivePhase(proxyInfo);" not in mark_connected_body
+    "boolean preserveFreshProxyPhase = ProxyCheckDiagnostics.hasFreshFailure(proxyInfo) || hasFreshUsableSuccess(proxyInfo, now);" not in mark_connected_body
     or "if (!preserveFreshProxyPhase)" not in mark_connected_body
     or mark_connected_body.find("if (!preserveFreshProxyPhase)") > mark_connected_body.find("proxyInfo.lastCheckDiagnostic = ProxyCheckDiagnostics.OK")
-    or mark_connected_body.find("if (!preserveFreshProxyPhase)") > mark_connected_body.find("rememberConnected(proxyInfo)")
+    or mark_connected_body.find("if (!preserveFreshProxyPhase)") > mark_connected_body.find("rememberConnected(proxyInfo, now)")
 ):
     print("Proxy check scheduler guard failed:")
-    print(f" - {SCHEDULER.relative_to(ROOT)}: generic connected-state observations must not overwrite fresh concrete proxy phases")
+    print(f" - {STORE.relative_to(ROOT)}: generic connected-state observations must preserve fresh terminal failure or usable success phases")
     sys.exit(1)
-mark_starting_start = scheduler_text.find("public static void markConnectionStarting")
-mark_starting_end = scheduler_text.find("public static void markConnectionUsable", mark_starting_start)
-mark_starting_body = scheduler_text[mark_starting_start:mark_starting_end]
+mark_starting_start = store_text.find("public static void markConnectionStarting")
+mark_starting_end = store_text.find("public static void markConnectionUsable", mark_starting_start)
+mark_starting_body = store_text[mark_starting_start:mark_starting_end]
 if (
     "proxyInfo.lastCheckDiagnostic = ProxyCheckDiagnostics.CONNECT_START;" not in mark_starting_body
-    or "proxyInfo.lastCheckDiagnosticTime = SystemClock.elapsedRealtime();" not in mark_starting_body
+    or "proxyInfo.lastCheckDiagnosticTime = now;" not in mark_starting_body
 ):
     print("Proxy check scheduler guard failed:")
-    print(f" - {SCHEDULER.relative_to(ROOT)}: explicit current-proxy reconnect attempts must publish connect_start with a fresh timestamp")
+    print(f" - {STORE.relative_to(ROOT)}: explicit current-proxy reconnect attempts must publish connect_start with a fresh timestamp")
     sys.exit(1)
 if "finish result=\" + (effectiveTime == -1" in scheduler_text or "onProxyChecked(listener.proxyInfo, effectiveTime)" in scheduler_text:
     print("Proxy check scheduler guard failed:")
@@ -165,21 +170,23 @@ if "String appliedDiagnostic = shouldPreserveConnectedState(request, time) ? Pro
     print(f" - {SCHEDULER.relative_to(ROOT)}: preserved connected-state proxy checks must not overwrite fresh concrete proxy phases with ok")
     sys.exit(1)
 if (
-    "private static String appliedDiagnosticForResult" not in scheduler_text
-    or "private static boolean hasFreshConcreteProxyPhase" not in scheduler_text
-    or "ProxyCheckDiagnostics.hasFreshFailure(proxyInfo) || ProxyCheckDiagnostics.hasFreshLivePhase(proxyInfo) || ProxyCheckDiagnostics.hasFreshEndpointCooldown(proxyInfo)" not in scheduler_text
-    or "appliedDiagnosticForResult(listener.proxyInfo, request, time, displayDiagnostic)" not in scheduler_text
+    "public static String appliedDiagnosticForProxyCheck" not in store_text
+    or "public static boolean hasFreshConcreteProxyPhase" not in store_text
+    or "ProxyCheckDiagnostics.hasFreshFailure(proxyInfo)" not in store_text
+    or "ProxyCheckDiagnostics.hasFreshLivePhase(proxyInfo)" not in store_text
+    or "ProxyCheckDiagnostics.hasFreshEndpointCooldown(proxyInfo)" not in store_text
+    or "ProxyRuntimeStateStore.appliedDiagnosticForProxyCheck(request.currentAccount, listener.proxyInfo, time, displayDiagnostic)" not in scheduler_text
 ):
     print("Proxy check scheduler guard failed:")
-    print(f" - {SCHEDULER.relative_to(ROOT)}: finishRequest must preserve each listener's fresh concrete proxy phase while suppressing false current-proxy check failures")
+    print(f" - {STORE.relative_to(ROOT)}: finishRequest must preserve each listener's fresh concrete proxy phase while suppressing false current-proxy check failures")
     sys.exit(1)
 if (
-    "private static boolean shouldRememberConnectedCheckResult" not in scheduler_text
-    or "time != -1 || shouldRememberConnectedCheckResult(request, time)" not in scheduler_text
-    or "finish_keep_proxy_phase endpoint=" not in scheduler_text
+    "private static boolean shouldPreserveProxyCheckFailure" not in store_text
+    or "decision=proxy_check_shadowed" not in store_text
+    or "rememberProxyCheckResult" not in scheduler_text
 ):
     print("Proxy check scheduler guard failed:")
-    print(f" - {SCHEDULER.relative_to(ROOT)}: preserved connected-state proxy checks must not clear endpoint backoff while a concrete proxy phase is still fresh")
+    print(f" - {STORE.relative_to(ROOT)}: preserved proxy checks must not clear endpoint backoff while a concrete proxy phase is still fresh")
     sys.exit(1)
 if "applyMeasuredResult(request.proxyInfo, appliedTime);" in scheduler_text:
     print("Proxy check scheduler guard failed:")
@@ -286,12 +293,12 @@ if "listener.proxyInfo.checking = false;" in scheduler_text and "clearCancelledL
     print("Proxy check scheduler guard failed:")
     print(f" - {SCHEDULER.relative_to(ROOT)}: listener cancel must not blindly clear shared ProxyInfo checking state")
     sys.exit(1)
-if ' + ":" + proxyInfo.port + ":" +' in scheduler_text:
+if ' + ":" + proxyInfo.port + ":" +' in scheduler_text or ' + ":" + proxyInfo.port + ":" +' in endpoint_key_text:
     print("Proxy check scheduler guard failed:")
-    print(f" - {SCHEDULER.relative_to(ROOT)}: endpointKey must not use delimiter-only concatenation")
+    print(f" - {ENDPOINT_KEY.relative_to(ROOT)}: exact endpointKey must not use delimiter-only concatenation")
     sys.exit(1)
-network_key_method = scheduler_text[scheduler_text.find("private static String endpointNetworkKey"):]
-network_key_method = network_key_method[:network_key_method.find("\n    private static", 1)]
+network_key_method = endpoint_key_text[endpoint_key_text.find("public static String network("):]
+network_key_method = network_key_method[:network_key_method.find("\n    public static", 1)]
 if (
     "normalizeKeyPart(proxyInfo.address, true)" not in network_key_method
     or "String.valueOf(proxyInfo.port)" not in network_key_method
@@ -300,18 +307,17 @@ if (
     or "proxyInfo.password" in network_key_method
 ):
     print("Proxy check scheduler guard failed:")
-    print(f" - {SCHEDULER.relative_to(ROOT)}: endpointNetworkKey must be host/port only, without secret or auth fields")
+    print(f" - {ENDPOINT_KEY.relative_to(ROOT)}: endpoint network key must be host/port only, without secret or auth fields")
     sys.exit(1)
-state_key_method = scheduler_text[scheduler_text.find("private static String endpointStateKeyForDiagnostic"):]
-state_key_method = state_key_method[:state_key_method.find("\n    private static", 1)]
+policy_text = POLICY.read_text(encoding="utf-8")
 for phase in sorted(name.upper() for name in endpoint_key_phases(ENDPOINT_NETWORK)):
-    if phase not in state_key_method:
+    if phase not in policy_text:
         print("Proxy check scheduler guard failed:")
-        print(f" - {SCHEDULER.relative_to(ROOT)}: endpointStateKeyForDiagnostic must use host/port state for {phase}")
+        print(f" - {POLICY.relative_to(ROOT)}: phase policy must use host/port state for {phase}")
         sys.exit(1)
-if "endpointNetworkKey(proxyInfo)" not in state_key_method or "endpointKey(proxyInfo)" not in state_key_method:
+if "case NETWORK:" not in endpoint_key_text or "case EXACT:" not in endpoint_key_text:
     print("Proxy check scheduler guard failed:")
-    print(f" - {SCHEDULER.relative_to(ROOT)}: phase-aware endpoint state must choose between host/port and exact proxy keys")
+    print(f" - {ENDPOINT_KEY.relative_to(ROOT)}: phase-aware endpoint state must choose between host/port and exact proxy keys")
     sys.exit(1)
 
 enqueue_stale_start = scheduler_text.find("public static int enqueueStale(")
@@ -337,19 +343,19 @@ if "shouldCheck(proxyInfo, false)" not in enqueue_stale_body:
     sys.exit(1)
 should_check_method = scheduler_text[scheduler_text.find("private static boolean shouldCheck"):]
 should_check_method = should_check_method[:should_check_method.find("\n    public static", 1)]
-if "markEndpointCooldown(proxyInfo, now);" not in should_check_method:
+if "ProxyRuntimeStateStore.markEndpointCooldown(proxyInfo, now);" not in should_check_method:
     print("Proxy check scheduler guard failed:")
     print(f" - {SCHEDULER.relative_to(ROOT)}: skipped endpoint backoff must publish endpoint_cooldown so GUI rows show the wait instead of looking unchecked")
     sys.exit(1)
-if "proxyInfo.lastCheckDiagnostic = ProxyCheckDiagnostics.ENDPOINT_COOLDOWN;" not in scheduler_text:
+if "proxyInfo.lastCheckDiagnostic = ProxyCheckDiagnostics.ENDPOINT_COOLDOWN;" not in store_text:
     print("Proxy check scheduler guard failed:")
-    print(f" - {SCHEDULER.relative_to(ROOT)}: scheduler endpoint cooldown must use the shared diagnostic string")
+    print(f" - {STORE.relative_to(ROOT)}: runtime store endpoint cooldown must use the shared diagnostic string")
     sys.exit(1)
 if "shouldCheck(request.proxyInfo, request.force)" not in scheduler_text:
     print("Proxy check scheduler guard failed:")
     print(f" - {SCHEDULER.relative_to(ROOT)}: queued starts must re-check cooldown before opening native sockets")
     sys.exit(1)
-if "rememberCheckResult(request, callbackTime, displayDiagnostic);" not in scheduler_text:
+if "ProxyRuntimeStateStore.rememberProxyCheckResult(request.currentAccount, request.proxyInfo, time, displayDiagnostic);" not in scheduler_text:
     print("Proxy check scheduler guard failed:")
     print(f" - {SCHEDULER.relative_to(ROOT)}: finishRequest must update endpoint backoff before listener fan-out")
     sys.exit(1)
@@ -364,7 +370,7 @@ if "rememberCheckResult(request, callbackTime, displayDiagnostic);" in scheduler
 
 rotation_text = ROTATION.read_text(encoding="utf-8")
 diagnostics_text = DIAGNOSTICS.read_text(encoding="utf-8")
-endpoint_backoff_method = scheduler_text[scheduler_text.find("public static boolean isEndpointBackedOff"):]
+endpoint_backoff_method = store_text[store_text.find("public static boolean isEndpointBackedOff"):]
 endpoint_backoff_method = endpoint_backoff_method[:endpoint_backoff_method.find("\n    public static", 1)]
 if (
     "nextAllowedCheckTime(proxyInfo)" not in endpoint_backoff_method
@@ -372,20 +378,20 @@ if (
     or "state.consecutiveFailures > 0" not in endpoint_backoff_method
 ):
     print("Proxy check scheduler guard failed:")
-    print(f" - {SCHEDULER.relative_to(ROOT)}: rotation-visible endpoint backoff must use scheduler nextAllowedCheckTime, current elapsed time, and failure count without treating connected grace as failure backoff")
+    print(f" - {STORE.relative_to(ROOT)}: rotation-visible endpoint backoff must use nextAllowedCheckTime, current elapsed time, and failure count without treating connected grace as failure backoff")
     sys.exit(1)
-mark_failure_method = scheduler_text[scheduler_text.find("public static void markEndpointFailure"):]
-mark_failure_method = mark_failure_method[:mark_failure_method.find("\n    private static", 1)]
+mark_failure_method = store_text[store_text.find("public static void markEndpointFailure"):]
+mark_failure_method = mark_failure_method[:mark_failure_method.find("\n    public static void markEndpointCooldown", 1)]
 if (
-    "ProxyCheckDiagnostics.shouldAccelerateProxyRotation(diagnostic)" not in mark_failure_method
-    or "endpointStateForKey(key)" not in mark_failure_method
-    or "rememberEndpointFailure" not in mark_failure_method
-    or "PROXY_CHECK_LIVE_FAILURE_DEDUP_MS" not in mark_failure_method
-    or "state.lastDiagnostic" not in mark_failure_method
-    or "state.lastCheckTime" not in mark_failure_method
+    "ProxyPhasePolicy.canBackoff(diagnostic)" not in mark_failure_method
+    or "rememberLiveFailure(proxyInfo, normalized, now)" not in mark_failure_method
+    or "rememberEndpointFailure" not in store_text
+    or "PROXY_CHECK_LIVE_FAILURE_DEDUP_MS" not in store_text
+    or "state.lastDiagnostic" not in store_text
+    or "state.lastCheckTime" not in store_text
 ):
     print("Proxy check scheduler guard failed:")
-    print(f" - {SCHEDULER.relative_to(ROOT)}: live current-connection failures must update shared endpoint backoff through the same failure helper without double-counting duplicate terminal stages")
+    print(f" - {STORE.relative_to(ROOT)}: live current-connection failures must update shared endpoint backoff through the same failure helper without double-counting duplicate terminal stages")
     sys.exit(1)
 endpoint_cooldown_method = diagnostics_text[diagnostics_text.find("public static boolean hasFreshEndpointCooldown"):]
 endpoint_cooldown_method = endpoint_cooldown_method[:endpoint_cooldown_method.find("\n    public static", 1)]
@@ -405,12 +411,11 @@ if passive_cooldown_index == -1 or passive_unchecked_index == -1 or passive_cool
     print("Proxy check scheduler guard failed:")
     print(f" - {DIAGNOSTICS.relative_to(ROOT)}: passive proxy rows must show fresh endpoint_cooldown before falling back to unchecked")
     sys.exit(1)
-accelerate_method = diagnostics_text[diagnostics_text.find("public static boolean shouldAccelerateProxyRotation"):]
-accelerate_method = accelerate_method[:accelerate_method.find("\n    public static", 1)]
+accelerate_method = POLICY.read_text(encoding="utf-8")
 for phase in sorted(name.upper() for name in rotation_phases()):
     if phase not in accelerate_method:
         print("Proxy check scheduler guard failed:")
-        print(f" - {DIAGNOSTICS.relative_to(ROOT)}: terminal phase {phase} must accelerate fallback rotation")
+        print(f" - {POLICY.relative_to(ROOT)}: terminal phase {phase} must accelerate fallback rotation")
         sys.exit(1)
 if "ProxyCheckScheduler.enqueueStale(currentAccount, SharedConfig.proxyList" in rotation_text:
     print("Proxy check scheduler guard failed:")

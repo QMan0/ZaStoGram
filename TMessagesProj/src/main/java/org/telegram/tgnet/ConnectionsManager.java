@@ -39,8 +39,8 @@ import org.telegram.messenger.KeepAliveJob;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.NotificationCenter;
-import org.telegram.messenger.ProxyCheckDiagnostics;
-import org.telegram.messenger.ProxyCheckScheduler;
+import org.telegram.messenger.ProxyConnectionEvent;
+import org.telegram.messenger.ProxyRuntimeStateStore;
 import org.telegram.messenger.PushListenerController;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.StatsController;
@@ -885,28 +885,9 @@ public class ConnectionsManager extends BaseController {
 
     public static void onProxyConnectionStageChanged(final int currentAccount, final String diagnostic, final String endpointKey) {
         AndroidUtilities.runOnUIThread(() -> {
-            String normalizedDiagnostic = ProxyCheckDiagnostics.normalize(diagnostic);
-            SharedConfig.ProxyInfo currentProxy = SharedConfig.currentProxy;
-            boolean concreteDiagnostic = ProxyCheckDiagnostics.isLivePhase(normalizedDiagnostic)
-                    || (ProxyCheckDiagnostics.isFailure(normalizedDiagnostic) && !ProxyCheckDiagnostics.UNKNOWN_FAIL.equals(normalizedDiagnostic));
-            boolean selectedAccountStage = currentAccount == UserConfig.selectedAccount;
-            boolean currentProxyMatchesStage = ProxyCheckScheduler.matchesEndpointStageKey(currentProxy, endpointKey);
-            boolean stageTargetsCurrentProxy = currentProxy != null && concreteDiagnostic && currentProxyMatchesStage;
-            if (stageTargetsCurrentProxy && ProxyCheckDiagnostics.shouldAccelerateProxyRotation(normalizedDiagnostic)) {
-                ProxyCheckScheduler.markEndpointFailure(currentProxy, normalizedDiagnostic);
-            }
-            if (selectedAccountStage && stageTargetsCurrentProxy) {
-                if (ProxyCheckDiagnostics.isProxyUsableSuccessPhase(normalizedDiagnostic)) {
-                    ProxyCheckScheduler.markConnectionUsable(currentProxy, normalizedDiagnostic);
-                } else if (!ProxyCheckDiagnostics.shouldKeepFreshFailure(currentProxy, normalizedDiagnostic)) {
-                    currentProxy.lastCheckDiagnostic = normalizedDiagnostic;
-                    currentProxy.lastCheckDiagnosticTime = SystemClock.elapsedRealtime();
-                } else if (BuildVars.LOGS_ENABLED) {
-                    FileLog.d("proxy_connection_stage_held account=" + currentAccount + " phase=" + normalizedDiagnostic + " held_by=" + currentProxy.lastCheckDiagnostic);
-                }
-            } else if (selectedAccountStage && currentProxy != null && concreteDiagnostic && BuildVars.LOGS_ENABLED) {
-                FileLog.d("proxy_connection_stage_ignored account=" + currentAccount + " phase=" + normalizedDiagnostic + " endpoint=" + endpointKey + " current=" + ProxyCheckScheduler.endpointStageKeyForLiveStage(currentProxy));
-            }
+            ProxyConnectionEvent event = ProxyConnectionEvent.nativeStage(currentAccount, diagnostic, endpointKey);
+            ProxyRuntimeStateStore.onNativeStage(event);
+            String normalizedDiagnostic = event.phase;
             if (BuildVars.LOGS_ENABLED) {
                 FileLog.d("proxy_connection_stage account=" + currentAccount + " phase=" + normalizedDiagnostic + " endpoint=" + endpointKey);
             }

@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 FILES = {
     "diagnostics": ROOT / "TMessagesProj/src/main/java/org/telegram/messenger/ProxyCheckDiagnostics.java",
+    "policy": ROOT / "TMessagesProj/src/main/java/org/telegram/messenger/ProxyPhasePolicy.java",
     "scheduler": ROOT / "TMessagesProj/src/main/java/org/telegram/messenger/ProxyCheckScheduler.java",
     "shared": ROOT / "TMessagesProj/src/main/java/org/telegram/messenger/SharedConfig.java",
     "proxy_list": ROOT / "TMessagesProj/src/main/java/org/telegram/ui/ProxyListActivity.java",
@@ -101,12 +102,9 @@ def main():
         "ProxyStatusTcpConnectedNoPong" in text("values") and "TCP открылся" in text("values_ru"),
         "localized GUI strings must describe tcp_connected_no_pong clearly",
     )
-    live_phase = diagnostics[
-        diagnostics.find("public static boolean isLivePhase"):
-        diagnostics.find("public static boolean isEarlyRetryPhase")
-    ]
+    live_phase = text("policy")
     require(
-        "case WAITING_TCP:" in live_phase,
+        "case ProxyCheckDiagnostics.WAITING_TCP:" in live_phase,
         "waiting_tcp is a live waiting state and must not be classified as a failure",
     )
     analyzer = text("analyzer")

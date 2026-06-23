@@ -13,6 +13,8 @@ CONNECTIONS_JAVA = ROOT / "TMessagesProj/src/main/java/org/telegram/tgnet/Connec
 PROXY_LIST = ROOT / "TMessagesProj/src/main/java/org/telegram/ui/ProxyListActivity.java"
 DIAGNOSTICS = ROOT / "TMessagesProj/src/main/java/org/telegram/messenger/ProxyCheckDiagnostics.java"
 SCHEDULER = ROOT / "TMessagesProj/src/main/java/org/telegram/messenger/ProxyCheckScheduler.java"
+STORE = ROOT / "TMessagesProj/src/main/java/org/telegram/messenger/ProxyRuntimeStateStore.java"
+POLICY = ROOT / "TMessagesProj/src/main/java/org/telegram/messenger/ProxyPhasePolicy.java"
 ANALYZER = ROOT / "Tools/analyze_mtproxy_markers.py"
 README = ROOT / "README.md"
 
@@ -42,6 +44,8 @@ def main() -> None:
     proxy_list = read(PROXY_LIST)
     diagnostics = read(DIAGNOSTICS)
     scheduler = read(SCHEDULER)
+    store = read(STORE)
+    policy = read(POLICY)
     analyzer = read(ANALYZER)
     readme = read(README)
 
@@ -196,7 +200,9 @@ def main() -> None:
         require(phase in diagnostics, f"ProxyCheckDiagnostics must know {phase}")
         require(phase in analyzer, f"analyzer must know {phase}")
     require(
-        "currentProxy.lastCheckDiagnostic = normalizedDiagnostic" in stage_bridge
+        "ProxyConnectionEvent.nativeStage" in stage_bridge
+        and "ProxyRuntimeStateStore.onNativeStage(event)" in stage_bridge
+        and "mirrorVisiblePhase(currentProxy, event.phase, event.timestamp)" in store
         and "postNotificationName(NotificationCenter.proxyConnectionStageChanged" in stage_bridge,
         "native live stages must update the current proxy and notify the proxy UI immediately",
     )
@@ -213,10 +219,10 @@ def main() -> None:
         "proxy row and window header must prefer fresh concrete phases over generic connecting text",
     )
     require(
-        "endpointStateKeyForDiagnostic" in scheduler
-        and "NETWORK_BLOCK_SUSPECTED" in scheduler
-        and "MTPROXY_PACKET_SENT_NO_RESPONSE" in scheduler,
-        "Java proxy-check scheduler must share endpoint-layer classification with native diagnostics",
+        "ProxyEndpointKey.forPhase(proxyInfo, normalizedDiagnostic)" in store
+        and "NETWORK_BLOCK_SUSPECTED" in policy
+        and "MTPROXY_PACKET_SENT_NO_RESPONSE" in policy,
+        "Java proxy runtime store must share endpoint-layer classification with native diagnostics",
     )
 
     # Documentation must keep future work scoped: DRS is valuable, but not first.

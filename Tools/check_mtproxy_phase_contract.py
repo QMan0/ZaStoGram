@@ -19,6 +19,7 @@ from mtproxy_phase_contract import (
 ROOT = Path(__file__).resolve().parents[1]
 
 DIAGNOSTICS = ROOT / "TMessagesProj/src/main/java/org/telegram/messenger/ProxyCheckDiagnostics.java"
+POLICY = ROOT / "TMessagesProj/src/main/java/org/telegram/messenger/ProxyPhasePolicy.java"
 SCHEDULER = ROOT / "TMessagesProj/src/main/java/org/telegram/messenger/ProxyCheckScheduler.java"
 SOCKET = ROOT / "TMessagesProj/jni/tgnet/ConnectionSocket.cpp"
 SOCKET_H = ROOT / "TMessagesProj/jni/tgnet/ConnectionSocket.h"
@@ -81,6 +82,7 @@ def analyzer_verdict_returns(analyzer: str) -> set[str]:
 
 def main() -> int:
     diagnostics = text(DIAGNOSTICS)
+    policy = text(POLICY)
     scheduler = text(SCHEDULER)
     socket = text(SOCKET)
     socket_h = text(SOCKET_H)
@@ -96,20 +98,21 @@ def main() -> int:
         "ProxyCheckDiagnostics.normalize must accept exactly the contract Java phases",
     )
     require(
-        java_cases(method_body(diagnostics, "public static boolean isLivePhase", "public static boolean isEarlyRetryPhase"), constants) == java_visible_live_phases(),
-        "ProxyCheckDiagnostics.isLivePhase must match contract live/success phases",
+        "kind == Kind.LIVE || kind == Kind.SUCCESS" in policy
+        and all(value.upper() in policy for value in java_visible_live_phases()),
+        "ProxyPhasePolicy.isLivePhase must match contract live/success phases",
     )
     require(
-        java_cases(method_body(diagnostics, "public static boolean isProxyUsableSuccessPhase", "public static class HeaderStatusTitle"), constants) == java_success_phases(),
-        "ProxyCheckDiagnostics.isProxyUsableSuccessPhase must match contract success phases",
+        all(value.upper() in policy and "usableSuccess" in policy for value in java_success_phases()),
+        "ProxyPhasePolicy.isProxyUsableSuccessPhase must match contract success phases",
     )
     require(
-        java_cases(method_body(diagnostics, "public static boolean shouldAccelerateProxyRotation", "public static boolean shouldKeepFreshFailure"), constants) == rotation_phases(),
-        "ProxyCheckDiagnostics.shouldAccelerateProxyRotation must match contract rotation phases",
+        all(value.upper() in policy for value in rotation_phases()) and "public static boolean shouldAccelerateProxyRotation" in policy,
+        "ProxyPhasePolicy.shouldAccelerateProxyRotation must match contract rotation phases",
     )
     require(
-        java_cases(method_body(scheduler, "private static String endpointStateKeyForDiagnostic", "private static EndpointState latestEndpointState"), constants) == endpoint_key_phases("network"),
-        "ProxyCheckScheduler.endpointStateKeyForDiagnostic must match contract network-key phases",
+        all(value.upper() in policy for value in endpoint_key_phases("network")) and "KeyScope.NETWORK" in policy,
+        "ProxyPhasePolicy key scope must match contract network-key phases",
     )
     require(
         native_diagnostics(socket, socket_h) == native_phase_names(),
