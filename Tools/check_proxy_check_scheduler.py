@@ -80,13 +80,13 @@ checks = [
     (PROXY_LIST, "ProxyCheckScheduler.clearDetachedCheckStates", "proxy list must clear stale check state without starting a full sweep"),
     (PROXY_LIST, "ProxyCheckScheduler.isFresh", "proxy list must use the shared freshness policy"),
     (PROXY_LIST, "markConnectedCurrentProxyIfNeeded", "proxy list must mark connected-state observations outside cell rendering"),
-    (PROXY_LIST, "ProxyCheckScheduler.markConnectionStarting", "proxy list must clear stale visible failures when a real user-selected proxy reconnect starts"),
+    (PROXY_LIST, "ProxyCheckScheduler.markConnectionStarting", "proxy list must publish reconnect telemetry when a real user-selected proxy reconnect starts"),
     (PROXY_LIST, "ProxyCheckScheduler.cancelOwner(this)", "proxy list must cancel queued checks on destroy"),
-    (PROXY_SETTINGS, "ProxyCheckScheduler.markConnectionStarting(currentProxyInfo)", "proxy settings save must clear stale visible failures before applying enabled proxy settings"),
-    (ANDROID_UTILITIES, "ProxyCheckScheduler.markConnectionStarting(SharedConfig.currentProxy)", "proxy link add/apply must clear stale visible failures before applying enabled proxy settings"),
+    (PROXY_SETTINGS, "ProxyCheckScheduler.markConnectionStarting(currentProxyInfo)", "proxy settings save must publish reconnect telemetry before applying enabled proxy settings"),
+    (ANDROID_UTILITIES, "ProxyCheckScheduler.markConnectionStarting(SharedConfig.currentProxy)", "proxy link add/apply must publish reconnect telemetry before applying enabled proxy settings"),
     (ENGINE, "ProxyRuntimeStateStore.isFresh", "proxy rotation must not switch to stale availability results"),
     (ROTATION, "ProxyRuntimeStateStore.markConnected(SharedConfig.currentProxy)", "proxy rotation must share connected-state freshness with the runtime store"),
-    (ROTATION, "ProxyRuntimeStateStore.markConnectionStarting(info)", "proxy rotation must publish a fresh starting phase before applying a fallback proxy"),
+    (ROTATION, "ProxyRuntimeStateStore.markConnectionStarting(info)", "proxy rotation must publish reconnect telemetry before applying a fallback proxy"),
     (ENGINE, "selectFallbackCandidate", "proxy rotation must try one unchecked endpoint through a real connection instead of full-list proxy checks"),
     (ROTATION, "switch fallback endpoint=", "proxy rotation must log one-at-a-time fallback switches distinctly"),
     (ROTATION, "engine.hasScheduledAttempt", "proxy rotation must not schedule duplicate delayed sweeps"),
@@ -107,7 +107,7 @@ checks = [
     (README, "Java backoff использует ту же фазовую идею ключей", "README must document Java scheduler phase-aware endpoint keys"),
     (README, "host:port:username:password:secret", "README must document exact-key proxy-check coalescing"),
     (README, "generic `Connected`", "README must document that generic connected-state observations do not erase fresh terminal proxy phases"),
-    (README, "Явный новый старт подключения", "README must document that explicit reconnect attempts publish a fresh starting phase"),
+    (README, "Явный новый старт подключения", "README must document explicit reconnect attempts without allowing them to erase fresh usable success"),
 ]
 
 failed = []
@@ -162,11 +162,14 @@ mark_starting_start = store_text.find("public static void markConnectionStarting
 mark_starting_end = store_text.find("public static void markConnectionUsable", mark_starting_start)
 mark_starting_body = store_text[mark_starting_start:mark_starting_end]
 if (
-    "ProxyStatusMirror.markConnectionStarting(proxyInfo, now);" not in mark_starting_body
-    or "ProxyHealthStore.clearUsableSuccessHold(proxyInfo);" not in mark_starting_body
+    "ProxyHealthStore.hasFreshUsableSuccess(proxyInfo, now)" not in mark_starting_body
+    or "decision=held_live_by_usable_success" not in mark_starting_body
+    or "ProxyStatusMirror.markConnectionStarting(proxyInfo, now);" not in mark_starting_body
+    or mark_starting_body.find("decision=held_live_by_usable_success") > mark_starting_body.find("ProxyStatusMirror.markConnectionStarting(proxyInfo, now);")
+    or "ProxyHealthStore.clearUsableSuccessHold(proxyInfo);" in mark_starting_body
 ):
     print("Proxy check scheduler guard failed:")
-    print(f" - {STORE.relative_to(ROOT)}: explicit current-proxy reconnect attempts must publish connect_start with a fresh timestamp")
+    print(f" - {STORE.relative_to(ROOT)}: explicit current-proxy reconnect attempts must hold fresh usable success before publishing visible connect_start")
     sys.exit(1)
 if "finish result=\" + (effectiveTime == -1" in scheduler_text or "onProxyChecked(listener.proxyInfo, effectiveTime)" in scheduler_text:
     print("Proxy check scheduler guard failed:")
@@ -270,7 +273,7 @@ manual_select_update = proxy_list_text.find("for (int a = proxyStartRow; a < pro
 manual_select_mark_starting = proxy_list_text.find("ProxyCheckScheduler.markConnectionStarting(SharedConfig.currentProxy);", manual_select_start)
 if manual_select_start == -1 or manual_select_update == -1 or manual_select_mark_starting == -1 or manual_select_mark_starting > manual_select_update:
     print("Proxy check scheduler guard failed:")
-    print(f" - {PROXY_LIST.relative_to(ROOT)}: manual proxy selection must publish connect_start before repainting visible proxy rows")
+    print(f" - {PROXY_LIST.relative_to(ROOT)}: manual proxy selection must publish reconnect telemetry before repainting visible proxy rows")
     sys.exit(1)
 reapply_start = proxy_list_text.find("private void reapplyCurrentProxySettings()")
 reapply_end = proxy_list_text.find("private void reapplyWssTransportSettings()", reapply_start)
@@ -280,7 +283,7 @@ if (
     or "updateCurrentProxyStatusCell();" not in reapply_body
 ):
     print("Proxy check scheduler guard failed:")
-    print(f" - {PROXY_LIST.relative_to(ROOT)}: MTProxy option reapply must immediately repaint the current row with the new connect_start phase")
+    print(f" - {PROXY_LIST.relative_to(ROOT)}: MTProxy option reapply must immediately repaint the current row with reconnect telemetry")
     sys.exit(1)
 if "notifyOwnerFinishedIfDrained(request)" in scheduler_text:
     print("Proxy check scheduler guard failed:")

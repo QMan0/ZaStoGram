@@ -57,8 +57,8 @@ def main() -> int:
     ):
         require(marker not in java, f"Java FileLog must route {marker} through writeLogLine", failures)
     require(
-        re.search(r"sanitizeLogMessage\(.*replace\('\\n', '\\\\n'\)", java, re.S)
-        and re.search(r"sanitizeLogMessage\(.*replace\('\\r', '\\\\r'\)", java, re.S),
+        'replace("\\n", "\\\\n")' in java
+        and 'replace("\\r", "\\\\r")' in java,
         "Java FileLog must sanitize embedded newlines so one event remains one physical log line",
         failures,
     )

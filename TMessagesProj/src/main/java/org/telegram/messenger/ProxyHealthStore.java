@@ -77,11 +77,6 @@ final class ProxyHealthStore {
         return Math.max(0, now - lastTime);
     }
 
-    static void clearUsableSuccessHold(SharedConfig.ProxyInfo proxyInfo) {
-        clearUsableSuccessHold(ProxyEndpointKey.exact(proxyInfo));
-        clearUsableSuccessHold(ProxyEndpointKey.network(proxyInfo));
-    }
-
     static EndpointFailureResult rememberLiveFailure(SharedConfig.ProxyInfo proxyInfo, String diagnostic, long now) {
         String normalized = ProxyCheckDiagnostics.normalize(diagnostic);
         String key = ProxyEndpointKey.forPhase(proxyInfo, normalized);
@@ -152,13 +147,6 @@ final class ProxyHealthStore {
                 && insideWindow
                 && state.rotationFailures >= PUNITIVE_FAILURES_TO_ROTATE;
         return new EndpointFailureResult(normalized, state.consecutiveFailures, state.rotationFailures, rotationAllowed, false);
-    }
-
-    private static void clearUsableSuccessHold(String key) {
-        EndpointState state = endpointStates.get(key);
-        if (state != null) {
-            state.usableSuccessUntil = 0;
-        }
     }
 
     private static long usableSuccessRemainingMs(String key, long now) {

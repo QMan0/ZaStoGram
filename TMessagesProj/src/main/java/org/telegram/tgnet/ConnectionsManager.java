@@ -148,6 +148,42 @@ public class ConnectionsManager extends BaseController {
     public final static int WSS_TRANSPORT_OFFICIAL = SharedConfig.TRANSPORT_WSS_OFFICIAL;
     public final static int WSS_TRANSPORT_CUSTOM = SharedConfig.TRANSPORT_WSS_CUSTOM;
     public final static int WSS_TRANSPORT_SOCKS5 = SharedConfig.TRANSPORT_WSS_SOCKS5;
+
+    private static final long TL_UNMAPPED_CONSTRUCTOR_LOG_INTERVAL_MS = 30_000;
+    private static final long TL_UNMAPPED_SUMMARY_INTERVAL_MS = 60_000;
+    private static final HashMap<Integer, UnmappedConstructorStats> unmappedConstructorStats = new HashMap<>();
+
+    private static class UnmappedConstructorStats {
+        long lastLogTime;
+        long lastSummaryTime;
+        int count;
+    }
+
+    private static void logTlDebugUnmappedConstructor(int constructor) {
+        if (!BuildVars.LOGS_ENABLED) {
+            return;
+        }
+        long now = SystemClock.elapsedRealtime();
+        UnmappedConstructorStats stats = unmappedConstructorStats.get(constructor);
+        if (stats == null) {
+            stats = new UnmappedConstructorStats();
+            unmappedConstructorStats.put(constructor, stats);
+        }
+        stats.count++;
+        if (stats.lastLogTime == 0 || now - stats.lastLogTime >= TL_UNMAPPED_CONSTRUCTOR_LOG_INTERVAL_MS) {
+            stats.lastLogTime = now;
+            FileLog.d(String.format("tl_debug_unmapped_constructor constructor=0x%x context=java_parser action=ignored", constructor));
+        }
+        if (stats.lastSummaryTime == 0) {
+            stats.lastSummaryTime = now;
+            return;
+        }
+        if (now - stats.lastSummaryTime >= TL_UNMAPPED_SUMMARY_INTERVAL_MS) {
+            FileLog.d(String.format("tl_debug_unmapped_summary constructor=0x%x count=%d", constructor, stats.count));
+            stats.lastSummaryTime = now;
+            stats.count = 0;
+        }
+    }
     public static final String BACKGROUND_NETWORK_ALWAYS_ON = "backgroundNetworkAlwaysOn";
 
     private static final int MT_PROXY_TLS_PROFILE_RANDOM_COUNT = 2;
@@ -911,9 +947,7 @@ public class ConnectionsManager extends BaseController {
                 KeepAliveJob.finishJob();
                 Utilities.stageQueue.postRunnable(() -> AccountInstance.getInstance(currentAccount).getMessagesController().processUpdates((TLRPC.Updates) message, false));
             } else {
-                if (BuildVars.LOGS_ENABLED) {
-                    FileLog.d(String.format("java_debug_parser_unmapped constructor=0x%x", constructor));
-                }
+                logTlDebugUnmappedConstructor(constructor);
             }
         } catch (Exception e) {
             FileLog.e(e);

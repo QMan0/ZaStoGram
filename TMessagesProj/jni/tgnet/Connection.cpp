@@ -11,6 +11,7 @@
 #include <cstring>
 #include <openssl/sha.h>
 #include <algorithm>
+#include <atomic>
 #include "Connection.h"
 #include "ConnectionsManager.h"
 #include "BuffersStorage.h"
@@ -21,6 +22,20 @@
 #include "ByteArray.h"
 
 thread_local static uint32_t lastConnectionToken = 1;
+
+namespace NetworkDebugCounters {
+std::atomic<uint64_t> partialPackets{0};
+std::atomic<uint64_t> partialPacketBytes{0};
+
+static void recordPartialPacket(uint32_t readBytes) {
+    NetworkDebugCounters::partialPackets.fetch_add(1, std::memory_order_relaxed);
+    NetworkDebugCounters::partialPacketBytes.fetch_add(readBytes, std::memory_order_relaxed);
+}
+
+static bool verboseNetworkDebugEnabled() {
+    return NETWORK_DEBUG_LOGS_ENABLED;
+}
+}
 
 static int32_t mtProxyHandshakePriorityForConnectionType(ConnectionType type) {
     switch ((int32_t) type & 0x0000ffff) {
@@ -312,7 +327,11 @@ void Connection::onReceivedData(NativeByteBuffer *buffer) {
         } else if (currentPacketLength == buffer->remaining()) {
             if (LOGS_ENABLED) DEBUG_D("connection(%p, account%u, dc%u, type %d) received message len %u equal to packet size", this, currentDatacenter->instanceNum, currentDatacenter->getDatacenterId(), connectionType, currentPacketLength);
         } else {
-            if (LOGS_ENABLED) DEBUG_D("connection(%p, account%u, dc%u, type %d) mtproto_partial_packet need=%u got=%u", this, currentDatacenter->instanceNum, currentDatacenter->getDatacenterId(), connectionType, currentPacketLength, buffer->remaining());
+            uint32_t assembledBytes = buffer->remaining();
+            NetworkDebugCounters::recordPartialPacket(assembledBytes);
+            if (LOGS_ENABLED && NetworkDebugCounters::verboseNetworkDebugEnabled()) {
+                DEBUG_D("mtproto_partial_packet assembled=%u expected=%u connection=%p account=%u dc=%u type=%d", assembledBytes, currentPacketLength, this, currentDatacenter->instanceNum, currentDatacenter->getDatacenterId(), connectionType);
+            }
 
             if (restOfTheData != nullptr && restOfTheData->capacity() < len) {
                 reuseLater = restOfTheData;

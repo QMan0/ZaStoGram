@@ -13,7 +13,8 @@
 #include <time.h>
 
 namespace {
-const int64_t BUFFER_POOL_PRESSURE_LOG_INTERVAL_MS = 1000;
+const int64_t BUFFER_POOL_PRESSURE_LOG_INTERVAL_MS = 5000;
+const int64_t BUFFER_POOL_SUMMARY_INTERVAL_MS = 60 * 1000;
 
 uint32_t bufferPoolMaxCountForCapacity(uint32_t capacity) {
     if (capacity == 8 || capacity == 128 || capacity == 1024 + 200) {
@@ -83,6 +84,8 @@ NativeByteBuffer *BuffersStorage::getFreeBuffer(uint32_t size) {
         if (arrayToGetFrom->size() > 0) {
             buffer = (*arrayToGetFrom)[0];
             arrayToGetFrom->erase(arrayToGetFrom->begin());
+        } else {
+            bufferPoolStatsByCapacity[byteCount].allocFallbackCount++;
         }
         if (isThreadSafe) {
             pthread_mutex_unlock(&mutex);
@@ -125,18 +128,27 @@ void BuffersStorage::reuseFreeBuffer(NativeByteBuffer *buffer) {
         if (isThreadSafe) {
             pthread_mutex_lock(&mutex);
         }
+        int64_t now = bufferPoolMonotonicMillis();
+        BufferPoolDebugStats &stats = bufferPoolStatsByCapacity[capacity];
+        stats.reusedCount++;
         if (arrayToReuse->size() < maxCount) {
             arrayToReuse->push_back(buffer);
+            if (arrayToReuse->size() > stats.peakCachedCount) {
+                stats.peakCachedCount = (uint32_t) arrayToReuse->size();
+            }
         } else {
             if (LOGS_ENABLED) {
-                int64_t now = bufferPoolMonotonicMillis();
                 int64_t lastLogTime = lastPressureLogByCapacity[capacity];
                 if (lastLogTime == 0 || now - lastLogTime >= BUFFER_POOL_PRESSURE_LOG_INTERVAL_MS) {
                     lastPressureLogByCapacity[capacity] = now;
-                    DEBUG_D("buffer_pool_pressure capacity=%u cached=%u limit=%u", capacity, (uint32_t) arrayToReuse->size(), maxCount);
+                    DEBUG_D("buffer_pool_pressure size=%u active=%u cap=%u alloc_fallback=%u", capacity, (uint32_t) arrayToReuse->size(), maxCount, stats.allocFallbackCount);
                 }
             }
             delete buffer;
+        }
+        if (LOGS_ENABLED && (stats.lastSummaryLogTime == 0 || now - stats.lastSummaryLogTime >= BUFFER_POOL_SUMMARY_INTERVAL_MS)) {
+            stats.lastSummaryLogTime = now;
+            DEBUG_D("buffer_pool_summary size=%u peak=%u alloc_fallback=%u reused=%u", capacity, stats.peakCachedCount, stats.allocFallbackCount, stats.reusedCount);
         }
         if (isThreadSafe) {
             pthread_mutex_unlock(&mutex);

@@ -16,6 +16,13 @@
 
 class NativeByteBuffer;
 
+struct BufferPoolDebugStats {
+    uint32_t allocFallbackCount = 0;
+    uint32_t reusedCount = 0;
+    uint32_t peakCachedCount = 0;
+    int64_t lastSummaryLogTime = 0;
+};
+
 class BuffersStorage {
 
 public:
@@ -33,6 +40,7 @@ private:
     std::vector<NativeByteBuffer *> freeBuffers32768;
     std::vector<NativeByteBuffer *> freeBuffersBig;
     std::map<uint32_t, int64_t> lastPressureLogByCapacity;
+    std::map<uint32_t, BufferPoolDebugStats> bufferPoolStatsByCapacity;
     bool isThreadSafe = true;
     pthread_mutex_t mutex;
 };

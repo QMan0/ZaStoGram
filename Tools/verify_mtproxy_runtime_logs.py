@@ -58,6 +58,8 @@ ROTATION_HYSTERESIS_WINDOW_MS = 30 * 1000
 ROTATION_FAILURES_TO_TRIGGER = 2
 WARMUP_UPLOAD_GET_FILE_LIMIT = 3
 WARMUP_TCP_CONNECT_GATE_LIMIT = 5
+DNS_OUTAGE_HOLD_MS = 60 * 1000
+DNS_OUTAGE_PROVIDERS = {"system", "google_json_doh", "cloudflare_json_doh"}
 
 
 def resolve_markers_path(path: Path) -> Path:
@@ -104,6 +106,12 @@ def proxy_control_decision(line: str) -> str:
 
 def same_proxy_endpoint(left: str, right: str) -> bool:
     return bool(left and right and (left == right or left.startswith(right) or right.startswith(left)))
+
+
+def endpoint_host(endpoint: str) -> str:
+    if not endpoint:
+        return ""
+    return endpoint.split(":", 1)[0].lower()
 
 
 def has_prior_connection_marker(lines: list[str], index: int, connection: str, marker: str) -> bool:
@@ -187,6 +195,37 @@ def verify_rotation_hysteresis(lines: list[str]) -> list[str]:
             previous_punitive = True
         if not previous_punitive:
             failures.append(f"proxy_rotation trigger without a prior punitive waiting_hysteresis inside 30s: {line}")
+    return failures
+
+
+def verify_dns_outage_rotation_hold(lines: list[str]) -> list[str]:
+    failures: list[str] = []
+    provider_failures: dict[str, tuple[int | None, set[str]]] = {}
+    for line in lines:
+        if "dns_resolver provider=" in line and ("result=success" in line or "result=stale" in line):
+            host = line_field(line, "host").lower()
+            if host:
+                provider_failures.pop(host, None)
+            continue
+        if "dns_resolver fallback provider=" in line:
+            provider = line_field(line, "provider")
+            host = line_field(line, "host").lower()
+            if provider in DNS_OUTAGE_PROVIDERS and host:
+                failed_at, providers = provider_failures.get(host, (line_time_ms(line), set()))
+                providers.add(provider)
+                provider_failures[host] = (failed_at, providers)
+            continue
+        if "proxy_rotation decision=trigger" not in line or line_field(line, "phase") != "host_resolve_failed":
+            continue
+        endpoint = line_field(line, "endpoint")
+        host = endpoint_host(endpoint)
+        failed_at, providers = provider_failures.get(host, (None, set()))
+        if not DNS_OUTAGE_PROVIDERS.issubset(providers):
+            continue
+        current_time = line_time_ms(line)
+        if failed_at is not None and current_time is not None and current_time - failed_at > DNS_OUTAGE_HOLD_MS:
+            continue
+        failures.append(f"proxy_rotation trigger during DNS outage: {line}")
     return failures
 
 
@@ -302,6 +341,7 @@ def verify_lines(lines: list[str]) -> list[str]:
 
     failures.extend(verify_visible_success_hold(lines))
     failures.extend(verify_rotation_hysteresis(lines))
+    failures.extend(verify_dns_outage_rotation_hold(lines))
     failures.extend(verify_dns_resolver_logs(lines))
     failures.extend(verify_startup_warmup_fanout(lines))
 

@@ -91,7 +91,7 @@ def run_analyzer_shadow_check(failures: list[str]) -> None:
                     "logcat.txt:8: 06-25 20:31:30.080 connection(0x1) mtproxy_startup first_tls_app_sent payload=244 frame=249",
                     "logcat.txt:9: 06-25 20:31:30.090 connection(0x1) mtproxy_startup first_tls_app_recv payload=1015",
                     "logcat.txt:10: 06-25 20:31:30.100 proxy_control decision=visible_usable_success source=native_stage account=0 phase=first_tls_app_recv endpoint=sberbank.dns.army:45631:ee:sberbank.dns.army",
-                    "logcat.txt:11: 06-25 20:31:30.110 proxy_control decision=held_connect_start_by_usable_success source=connect_start phase=connect_start endpoint=sberbank.dns.army:45631:ee:sberbank.dns.army held_by=first_tls_app_recv",
+                    "logcat.txt:11: 06-25 20:31:30.110 proxy_control decision=held_live_by_usable_success source=connect_start phase=connect_start endpoint=sberbank.dns.army:45631:ee:sberbank.dns.army held_by=first_tls_app_recv",
                     "logcat.txt:12: 06-25 20:31:30.120 proxy_control decision=held_live_by_usable_success source=native_stage account=0 phase=tcp_connect_gate endpoint=sberbank.dns.army:45631 held_by=first_tls_app_recv",
                     "logcat.txt:13: 06-25 20:31:30.200 connection(0x2) connecting via proxy sberbank.dns.army:45631 secret[34] secret_kind=ee",
                     "logcat.txt:14: 06-25 20:31:30.210 connection(0x2) mtproxy_startup endpoint_failure_shadowed_by_success key=sberbank.dns.army:45631 phase=tcp_not_connected reason=closeSocket hold_ms=44900",
@@ -114,7 +114,6 @@ def run_analyzer_shadow_check(failures: list[str]) -> None:
         require("tcp_not_connected: 1" not in result.stdout, "shadowed sibling failure must not count as tcp_not_connected", failures)
         require("endpoint_failure_shadowed_by_success" in result.stdout, "analyzer must preserve the shadow marker", failures)
         require("held_by_usable_success" in result.stdout, "analyzer must preserve Java usable-success hold decisions", failures)
-        require("held_connect_start_by_usable_success" in result.stdout, "analyzer must preserve Java connect-start hold decisions", failures)
         require("held_live_by_usable_success" in result.stdout, "analyzer must preserve Java live-stage hold decisions", failures)
 
 
@@ -140,6 +139,8 @@ def run_runtime_log_visible_hold_check(failures: list[str]) -> None:
         session = Path(tmp)
         bad = session / "bad_markers.txt"
         good = session / "good_markers.txt"
+        bad_connect_start = session / "bad_connect_start_markers.txt"
+        good_connect_start = session / "good_connect_start_markers.txt"
         bad.write_text(
             runtime_log_lines(
                 "logcat.txt:7: 06-25 20:31:31.110 proxy_control decision=visible_only source=native_stage account=0 phase=tcp_connect_gate endpoint=sberbank.dns.army:45631"
@@ -149,6 +150,18 @@ def run_runtime_log_visible_hold_check(failures: list[str]) -> None:
         good.write_text(
             runtime_log_lines(
                 "logcat.txt:7: 06-25 20:31:31.110 proxy_control decision=held_live_by_usable_success source=native_stage account=0 phase=tcp_connect_gate endpoint=sberbank.dns.army:45631 held_by=first_tls_app_recv"
+            ),
+            encoding="utf-8",
+        )
+        bad_connect_start.write_text(
+            runtime_log_lines(
+                "logcat.txt:7: 06-25 20:31:31.110 proxy_control decision=visible_only source=connect_start phase=connect_start endpoint=sberbank.dns.army:45631:ee:sberbank.dns.army"
+            ),
+            encoding="utf-8",
+        )
+        good_connect_start.write_text(
+            runtime_log_lines(
+                "logcat.txt:7: 06-25 20:31:31.110 proxy_control decision=held_live_by_usable_success source=connect_start phase=connect_start endpoint=sberbank.dns.army:45631:ee:sberbank.dns.army held_by=first_tls_app_recv"
             ),
             encoding="utf-8",
         )
@@ -177,6 +190,33 @@ def run_runtime_log_visible_hold_check(failures: list[str]) -> None:
         require(
             good_result.returncode == 0,
             good_result.stderr.strip() or "runtime log verifier must allow held_live_by_usable_success after visible usable success",
+            failures,
+        )
+        bad_connect_start_result = subprocess.run(
+            [sys.executable, str(RUNTIME_LOG_VERIFIER), str(bad_connect_start)],
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        require(
+            bad_connect_start_result.returncode != 0
+            and "visible usable success overwritten by live visible_only" in bad_connect_start_result.stderr,
+            "runtime log verifier must fail when Java connect_start overwrites a fresh usable success within 45s",
+            failures,
+        )
+        good_connect_start_result = subprocess.run(
+            [sys.executable, str(RUNTIME_LOG_VERIFIER), str(good_connect_start)],
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        require(
+            good_connect_start_result.returncode == 0,
+            good_connect_start_result.stderr.strip() or "runtime log verifier must allow held_live_by_usable_success for Java connect_start after visible usable success",
             failures,
         )
 
@@ -256,24 +296,35 @@ def main() -> int:
         failures,
     )
     mark_start = method_body(store, "public static void markConnectionStarting")
-    connect_start_hold_idx = mark_start.find("decision=held_connect_start_by_usable_success")
+    connect_start_hold_idx = mark_start.find("decision=held_live_by_usable_success")
+    current_proxy_hold_idx = mark_start.find("decision=held_live_by_current_proxy_usable")
     clear_hold_idx = mark_start.find("ProxyHealthStore.clearUsableSuccessHold(proxyInfo)")
     mark_visible_idx = mark_start.find("ProxyStatusMirror.markConnectionStarting(proxyInfo, now)")
     require(
         connect_start_hold_idx >= 0
-        and clear_hold_idx >= 0
         and mark_visible_idx >= 0
-        and connect_start_hold_idx < clear_hold_idx
         and connect_start_hold_idx < mark_visible_idx
         and "ProxyHealthStore.hasFreshUsableSuccess(proxyInfo, now)" in mark_start
-        and "return;" in mark_start[connect_start_hold_idx:clear_hold_idx],
-        "Java connect_start must be held by fresh usable success before clearing the hold or overwriting visible state",
+        and "return;" in mark_start[connect_start_hold_idx:mark_visible_idx],
+        "Java connect_start must be held by fresh usable success before it can overwrite visible state",
+        failures,
+    )
+    require(
+        clear_hold_idx == -1,
+        "Java connect_start must not clear usable-success hold; only endpoint switches or real punitive failures may do that",
         failures,
     )
     require(
         "isCurrentProxyUsable(proxyInfo, now)" in mark_start
-        and connect_start_hold_idx < mark_visible_idx,
+        and current_proxy_hold_idx >= 0
+        and current_proxy_hold_idx < mark_visible_idx,
         "Java connect_start must also be held while the selected account is already connected/updating through the current proxy",
+        failures,
+    )
+    require(
+        "held_connect_start_by_usable_success" not in store
+        and "held_connect_start_by_current_proxy_usable" not in store,
+        "Java connect_start hold decisions must use the shared held_live_by_* taxonomy",
         failures,
     )
 
@@ -352,7 +403,6 @@ def main() -> int:
     require("held_by_usable_success" in analyzer, "analyzer must preserve Java usable-success hold decisions", failures)
     require("held_live_by_usable_success" in analyzer, "analyzer must explain Java live-stage holds after usable success", failures)
     require("held_live_by_current_proxy_usable" in analyzer, "analyzer must explain Java live-stage holds while the current proxy is connected", failures)
-    require("held_connect_start_by_usable_success" in analyzer, "analyzer must explain Java connect-start holds after usable success", failures)
     require('"check_proxy_usable_success_hold.py"' in all_checks, "full guard suite must include usable-success hold guard", failures)
 
     run_analyzer_shadow_check(failures)

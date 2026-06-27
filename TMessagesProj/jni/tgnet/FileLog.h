@@ -25,11 +25,13 @@ public:
     static FileLog &getInstance();
 
 private:
+    static void writeNativeLogLine(int androidPriority, const char *fileSeverity, const char *stdoutSeverity, const char *message, va_list args);
     FILE *logFile = nullptr;
     pthread_mutex_t mutex;
 };
 
 extern bool LOGS_ENABLED;
+extern bool NETWORK_DEBUG_LOGS_ENABLED;
 
 #define DEBUG_FATAL FileLog::getInstance().fatal
 #define DEBUG_E FileLog::getInstance().e

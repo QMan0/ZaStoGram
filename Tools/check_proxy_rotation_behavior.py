@@ -7,6 +7,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 MESSENGER = ROOT / "TMessagesProj/src/main/java/org/telegram/messenger"
+CONNECTIONS = ROOT / "TMessagesProj/src/main/java/org/telegram/tgnet/ConnectionsManager.java"
 ROTATION = MESSENGER / "ProxyRotationController.java"
 ENGINE = MESSENGER / "ProxyRotationEngine.java"
 STORE = MESSENGER / "ProxyRuntimeStateStore.java"
@@ -97,6 +98,8 @@ def run_runtime_rotation_log_checks(failures: list[str]) -> None:
         live_trigger = session / "live_trigger.txt"
         success_trigger = session / "success_trigger.txt"
         good_trigger = session / "good_trigger.txt"
+        dns_outage_trigger = session / "dns_outage_trigger.txt"
+        dns_outage_hold = session / "dns_outage_hold.txt"
         live_trigger.write_text(
             runtime_log_fixture(
                 "06-25 20:31:31.110 proxy_rotation decision=trigger phase=tcp_connect_gate endpoint=sberbank.dns.army:45631 count=2 required=2"
@@ -115,6 +118,27 @@ def run_runtime_rotation_log_checks(failures: list[str]) -> None:
             runtime_log_fixture(
                 "06-25 20:32:20.100 proxy_rotation decision=waiting_hysteresis phase=tcp_not_connected endpoint=sberbank.dns.army:45631 count=1 required=2",
                 "06-25 20:32:21.100 proxy_rotation decision=trigger phase=tcp_not_connected endpoint=sberbank.dns.army:45631 count=2 required=2",
+            ),
+            encoding="utf-8",
+        )
+        dns_outage_trigger.write_text(
+            runtime_log_fixture(
+                "06-25 20:33:00.000 D/tmessages dns_resolver fallback provider=system host=avito.mosru.v6.rocks reason=inet_UnknownHostException",
+                "06-25 20:33:00.100 D/tmessages dns_resolver fallback provider=google_json_doh host=avito.mosru.v6.rocks reason=UnknownHostException",
+                "06-25 20:33:00.200 D/tmessages dns_resolver fallback provider=cloudflare_json_doh host=avito.mosru.v6.rocks reason=UnknownHostException",
+                "06-25 20:33:00.300 D/tmessages dns_resolver provider=chain result=resolve_failed host=avito.mosru.v6.rocks ipv4=0 ipv6=0 source=",
+                "06-25 20:33:00.400 proxy_rotation decision=waiting_hysteresis phase=host_resolve_failed endpoint=avito.mosru.v6.rocks:45631 count=1 required=2",
+                "06-25 20:33:00.500 proxy_rotation decision=trigger phase=host_resolve_failed endpoint=avito.mosru.v6.rocks:45631 count=2 required=2",
+            ),
+            encoding="utf-8",
+        )
+        dns_outage_hold.write_text(
+            runtime_log_fixture(
+                "06-25 20:33:00.000 D/tmessages dns_resolver fallback provider=system host=avito.mosru.v6.rocks reason=inet_UnknownHostException",
+                "06-25 20:33:00.100 D/tmessages dns_resolver fallback provider=google_json_doh host=avito.mosru.v6.rocks reason=UnknownHostException",
+                "06-25 20:33:00.200 D/tmessages dns_resolver fallback provider=cloudflare_json_doh host=avito.mosru.v6.rocks reason=UnknownHostException",
+                "06-25 20:33:00.300 D/tmessages dns_resolver provider=chain result=resolve_failed host=avito.mosru.v6.rocks ipv4=0 ipv6=0 source=",
+                "06-25 20:33:00.500 proxy_rotation decision=dns_outage_hold phase=host_resolve_failed endpoint=avito.mosru.v6.rocks:45631 host=avito.mosru.v6.rocks",
             ),
             encoding="utf-8",
         )
@@ -157,6 +181,33 @@ def run_runtime_rotation_log_checks(failures: list[str]) -> None:
             good_result.stderr.strip() or "runtime log verifier must accept trigger only after two punitive failures inside the window",
             failures,
         )
+        dns_outage_trigger_result = subprocess.run(
+            [sys.executable, str(RUNTIME_LOG_VERIFIER), str(dns_outage_trigger)],
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        require(
+            dns_outage_trigger_result.returncode != 0
+            and "proxy_rotation trigger during DNS outage" in dns_outage_trigger_result.stderr,
+            "runtime log verifier must reject host_resolve_failed rotation while system, Google DoH, and Cloudflare DoH all fail for the same host",
+            failures,
+        )
+        dns_outage_hold_result = subprocess.run(
+            [sys.executable, str(RUNTIME_LOG_VERIFIER), str(dns_outage_hold)],
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        require(
+            dns_outage_hold_result.returncode == 0,
+            dns_outage_hold_result.stderr.strip() or "runtime log verifier must accept dns_outage_hold instead of host_resolve_failed rotation",
+            failures,
+        )
 
 
 def main() -> int:
@@ -166,6 +217,7 @@ def main() -> int:
     store = read(STORE)
     health = read(HEALTH)
     status = read(STATUS)
+    connections = read(CONNECTIONS)
     check_all = read(CHECK_ALL)
     policy = read(MESSENGER / "ProxyPhasePolicy.java")
 
@@ -179,6 +231,8 @@ def main() -> int:
     record_switch = method_body(engine, "void recordSwitch")
     is_candidate_allowed = method_body(engine, "private boolean isCandidateAllowed")
     should_schedule_fallback = method_body(store, "public static boolean shouldScheduleFallback")
+    on_native_stage = method_body(store, "public static Decision onNativeStage")
+    mark_endpoint_failure = method_body(store, "public static ProxyHealthStore.EndpointFailureResult markEndpointFailure")
 
     require(
         ordered(
@@ -294,9 +348,51 @@ def main() -> int:
         "ProxyPhasePolicy.isPunitiveFailure(normalized)" in should_schedule_fallback
         and "decision=ignored_non_punitive" in should_schedule_fallback
         and "decision=held_by_usable_success" in should_schedule_fallback
+        and "decision=dns_outage_hold" in should_schedule_fallback
         and "decision=waiting_hysteresis" in should_schedule_fallback
         and "decision=trigger" in should_schedule_fallback,
-        "fallback scheduling must log explicit proxy_rotation decisions and reject non-punitive phases before hysteresis",
+        "fallback scheduling must log explicit proxy_rotation decisions and reject non-punitive or DNS-outage phases before hysteresis",
+        failures,
+    )
+    require(
+        "DnsOutageState" in store
+        and "recordDnsResolverProviderFailure" in store
+        and "recordDnsResolveChainFailure" in store
+        and "recordDnsResolveSuccess" in store
+        and "isDnsGlobalOutage" in store,
+        "runtime store must track per-host DNS outage state from resolver-chain failures",
+        failures,
+    )
+    require(
+        "shouldHoldHostResolveFailureByDnsOutage(currentProxy, event.phase, event.timestamp)" in on_native_stage
+        and ordered(
+            on_native_stage,
+            "shouldHoldHostResolveFailureByDnsOutage(currentProxy, event.phase, event.timestamp)",
+            "decision=dns_outage_hold",
+            "ProxyStatusMirror.mirrorVisiblePhase",
+            "ProxyHealthStore.rememberLiveFailure",
+        ),
+        "native host_resolve_failed must be held by DNS outage before visible overwrite, endpoint backoff, or rotation",
+        failures,
+    )
+    require(
+        "shouldHoldHostResolveFailureByDnsOutage(proxyInfo, normalized, now)" in mark_endpoint_failure
+        and ordered(
+            mark_endpoint_failure,
+            "shouldHoldHostResolveFailureByDnsOutage(proxyInfo, normalized, now)",
+            "decision=dns_outage_hold",
+            "ProxyHealthStore.rememberLiveFailure",
+        ),
+        "explicit host_resolve_failed endpoint failures must be held by DNS outage before endpoint backoff",
+        failures,
+    )
+    require(
+        "recordDnsResolverProviderFailure(host, resolver.name()" in connections
+        and "recordDnsResolveChainFailure(host, systemFailed, googleFailed, cloudflareFailed)" in connections
+        and "recordDnsResolveSuccess(host, resolver.name())" in connections
+        and "recordDnsResolveSuccess(hostName, \"cache\")" in connections
+        and "recordDnsResolveSuccess(host, \"cache_stale\")" in connections,
+        "ConnectionsManager DNS resolver chain must publish provider failures, full-chain failures, and cache/stale/success recovery to the runtime store",
         failures,
     )
     require(

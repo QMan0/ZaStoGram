@@ -20,6 +20,7 @@
 #include <memory>
 #include <string>
 #include <cinttypes>
+#include <map>
 #include "ConnectionsManager.h"
 #include "FileLog.h"
 #include "EventObject.h"
@@ -45,6 +46,47 @@ jmethodID jclass_ByteBuffer_allocateDirect = nullptr;
 #endif
 
 static bool done = false;
+
+namespace {
+const int64_t TL_UNMAPPED_CONSTRUCTOR_LOG_INTERVAL_MS = 30 * 1000;
+const int64_t TL_UNMAPPED_SUMMARY_INTERVAL_MS = 60 * 1000;
+
+struct UnmappedConstructorDebugStats {
+    int64_t lastLogTime = 0;
+    int64_t lastSummaryTime = 0;
+    uint32_t count = 0;
+};
+
+std::map<uint32_t, UnmappedConstructorDebugStats> unmappedConstructorStats;
+
+static int64_t tlDebugMonotonicMillis() {
+    struct timespec timeSpec;
+    clock_gettime(CLOCK_BOOTTIME, &timeSpec);
+    return (int64_t) timeSpec.tv_sec * 1000 + (int64_t) timeSpec.tv_nsec / 1000000;
+}
+
+static void logTlDebugUnmappedConstructor(uint32_t constructor, const char *context) {
+    if (!LOGS_ENABLED) {
+        return;
+    }
+    int64_t now = tlDebugMonotonicMillis();
+    UnmappedConstructorDebugStats &stats = unmappedConstructorStats[constructor];
+    stats.count++;
+    if (stats.lastLogTime == 0 || now - stats.lastLogTime >= TL_UNMAPPED_CONSTRUCTOR_LOG_INTERVAL_MS) {
+        stats.lastLogTime = now;
+        DEBUG_D("tl_debug_unmapped_constructor constructor=0x%x context=%s action=ignored", constructor, context != nullptr ? context : "unknown");
+    }
+    if (stats.lastSummaryTime == 0) {
+        stats.lastSummaryTime = now;
+        return;
+    }
+    if (now - stats.lastSummaryTime >= TL_UNMAPPED_SUMMARY_INTERVAL_MS) {
+        DEBUG_D("tl_debug_unmapped_summary constructor=0x%x count=%u", constructor, stats.count);
+        stats.lastSummaryTime = now;
+        stats.count = 0;
+    }
+}
+}
 
 static const char *proxyCheckStateName(ProxyCheckState state) {
     switch (state) {
@@ -1161,7 +1203,7 @@ void ConnectionsManager::onConnectionDataReceived(Connection *connection, Native
                     sendMessagesToConnectionWithConfirmation(messages, connection, false);
                 }
             } else {
-                if (LOGS_ENABLED) DEBUG_D("connection(%p, account%u, dc%u, type %d) debug_parser_unmapped_packet req_msg_id=0x%" PRIx64, connection, instanceNum, datacenter->getDatacenterId(), connection->getConnectionType(), req_msg_id);
+                if (LOGS_ENABLED) DEBUG_D("connection(%p, account%u, dc%u, type %d) tl_debug_unmapped_packet req_msg_id=0x%" PRIx64 " context=message action=delegate_java", connection, instanceNum, datacenter->getDatacenterId(), connection->getConnectionType(), req_msg_id);
                 if (delegate != nullptr) {
                     delegate->onUnparsedMessageReceived(messageId, data, connection->getConnectionType(), instanceNum);
                 }
@@ -1236,7 +1278,7 @@ TLObject *ConnectionsManager::TLdeserialize(TLObject *request, uint32_t bytes, N
             auto apiRequest = dynamic_cast<TL_api_request *>(request);
             if (apiRequest != nullptr) {
                 object = apiRequest->deserializeResponse(data, bytes, instanceNum, error);
-                if (LOGS_ENABLED) DEBUG_D("api request constructor 0x%x, don't parse", constructor);
+                logTlDebugUnmappedConstructor(constructor, "api_request");
             } else {
                 object = request->deserializeResponse(data, constructor, instanceNum, error);
                 if (object != nullptr && error) {
@@ -1245,7 +1287,7 @@ TLObject *ConnectionsManager::TLdeserialize(TLObject *request, uint32_t bytes, N
                 }
             }
         } else {
-            if (LOGS_ENABLED) DEBUG_D("debug_parser_unmapped constructor=0x%x", constructor);
+            logTlDebugUnmappedConstructor(constructor, "rpc_result");
         }
     }
     if (object == nullptr) {
@@ -1883,7 +1925,7 @@ void ConnectionsManager::processServerResponse(TLObject *message, int64_t messag
             processServerResponse(object, messageId, messageSeqNo, messageSalt, connection, innerMsgId, containerMessageId);
             delete object;
         } else {
-            if (LOGS_ENABLED) DEBUG_D("connection(%p, account%u, dc%u, type %d) received unparsed from gzip object on 0x%" PRIx64, connection, instanceNum, datacenter->getDatacenterId(), connection->getConnectionType(), messageId);
+            if (LOGS_ENABLED) DEBUG_D("connection(%p, account%u, dc%u, type %d) tl_debug_unmapped_packet req_msg_id=0x%" PRIx64 " context=gzip action=delegate_java", connection, instanceNum, datacenter->getDatacenterId(), connection->getConnectionType(), messageId);
             if (delegate != nullptr) {
                 delegate->onUnparsedMessageReceived(messageId, data, connection->getConnectionType(), instanceNum);
             }
