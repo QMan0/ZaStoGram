@@ -39,6 +39,10 @@ class _UserConfigProxy:
     def __getattr__(self, name):
         return getattr(self.__dict__["_uc"], name)
 
+    def __setattr__(self, name, value):
+        # Forward writes to the real UserConfig too (reads already forward via __getattr__).
+        setattr(self.__dict__["_uc"], name, value)
+
 
 def get_user_config():
     uc = PluginUtils.getUserConfig()

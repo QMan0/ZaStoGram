@@ -18,8 +18,8 @@ import de.robv.android.xposed.XposedBridge;
 /**
  * Lets plugins observe and rewrite MTProto responses via BasePlugin.post_request_hook.
  *
- * Strategy: hook the 9-arg {@link ConnectionsManager#sendRequest} (every RequestDelegate-based
- * overload funnels into it) and, in beforeHookedMethod, wrap the onComplete delegate (args[1])
+ * Strategy: hook ConnectionsManager.sendRequestInternal (the single funnel that both the async
+ * sendRequest and the sync sendRequestSync paths reach) and, in beforeHookedMethod, wrap the onComplete delegate (args[1])
  * so plugins run just before the response is delivered. Gated by {@link #active} so there is no
  * per-request work unless a plugin actually registers a request hook.
  */
@@ -46,11 +46,14 @@ public final class PluginRequestInterceptor {
             return;
         }
         try {
+            // sendRequestInternal is the single funnel for BOTH the async sendRequest path and the
+            // sync sendRequestSync path (file downloads), so hooking it catches every request.
+            // (private; Pine/Xposed hooks private members fine. Trailing int = requestToken.)
             Method m = ConnectionsManager.class.getDeclaredMethod(
-                    "sendRequest",
+                    "sendRequestInternal",
                     TLObject.class, RequestDelegate.class, RequestDelegateTimestamp.class,
                     QuickAckDelegate.class, WriteToSocketDelegate.class,
-                    int.class, int.class, int.class, boolean.class);
+                    int.class, int.class, int.class, boolean.class, int.class);
             XposedBridge.hookMethod(m, new SendRequestHook());
             installed = true;
             FileLog.d("zasto plugins: request interceptor installed");

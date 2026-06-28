@@ -54,9 +54,12 @@ def main() -> None:
     require(
         "public static int mtProxyConnectionPatternMode" in shared_config
         and 'getInt("mtProxyConnectionPatternMode"' in shared_config
-        and 'getBoolean("mtProxyHandshakeAdmission", false)' in shared_config
         and 'putInt("mtProxyConnectionPatternMode", mtProxyConnectionPatternMode)' in shared_config,
-        "SharedConfig must persist integer connection-pattern mode and migrate the old admission boolean",
+        "SharedConfig must persist integer connection-pattern mode",
+    )
+    require(
+        'getBoolean("mtProxyHandshakeAdmission"' not in shared_config,
+        "SharedConfig must not migrate the old admission boolean into connection-pattern mode",
     )
     require(
         "static int resolveMtProxyConnectionPatternMode()" in connections

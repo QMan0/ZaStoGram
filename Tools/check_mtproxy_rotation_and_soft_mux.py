@@ -132,9 +132,12 @@ def main() -> None:
     require(
         "mtProxyConnectionPatternMode" in shared_config
         and 'getInt("mtProxyConnectionPatternMode"' in shared_config
-        and 'getBoolean("mtProxyHandshakeAdmission", false)' in shared_config
         and 'putInt("mtProxyConnectionPatternMode", mtProxyConnectionPatternMode)' in shared_config,
-        "SharedConfig must persist connection-pattern modes and migrate the old admission-controller boolean",
+        "SharedConfig must persist connection-pattern modes",
+    )
+    require(
+        'getBoolean("mtProxyHandshakeAdmission"' not in shared_config,
+        "SharedConfig must not migrate the old admission-controller boolean",
     )
     require(
         "mtProxyConnectionPatternRow" in proxy_list

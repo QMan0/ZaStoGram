@@ -127,7 +127,25 @@ class BasePlugin:
     # ------------------------------------------------------------------ settings storage
 
     def get_setting(self, key, default=None):
-        return self._context.getSetting(key, default)
+        value = self._context.getSetting(key, default)
+        if value is None:
+            return default
+        # getSetting is declared to return Object, so Chaquopy hands back a Java-typed proxy
+        # (e.g. java.lang.Boolean) that does NOT unbox via bool()/int(). Coerce to the native
+        # Python type implied by `default`. NB: check bool before int — bool subclasses int.
+        if isinstance(default, bool):
+            return str(value).strip().lower() == "true"
+        if isinstance(default, int):
+            try:
+                return int(value)
+            except Exception:
+                return default
+        if isinstance(default, float):
+            try:
+                return float(value)
+            except Exception:
+                return default
+        return str(value)
 
     def set_setting(self, key, value):
         self._context.setSetting(key, value)
